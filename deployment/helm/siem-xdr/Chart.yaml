@@ -1,0 +1,28 @@
+apiVersion: v2
+name: siem-xdr
+description: AIGuardSIEM - Production SIEM/XDR Platform
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - security
+  - siem
+  - xdr
+  - threat-detection
+  - incident-response
+maintainers:
+  - name: AIGuard Security Team
+    email: security@aiguard.io
+dependencies:
+  - name: kafka
+    version: "25.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: kafka.enabled
+  - name: etcd
+    version: "9.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: etcd.enabled
+  - name: clickhouse
+    version: "3.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: clickhouse.enabled

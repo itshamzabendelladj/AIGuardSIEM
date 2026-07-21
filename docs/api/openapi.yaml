@@ -1,0 +1,236 @@
+openapi: 3.0.3
+info:
+  title: AIGuardSIEM API
+  description: Production SIEM/XDR Platform REST API
+  version: 1.0.0
+  contact:
+    name: AIGuard Security Team
+    email: security@aiguard.io
+  license:
+    name: MIT
+
+servers:
+  - url: https://api.aiguard.io/v1
+    description: Production
+  - url: http://localhost:8080/api/v1
+    description: Development
+
+security:
+  - BearerAuth: []
+
+paths:
+  /alerts:
+    get:
+      summary: List alerts
+      parameters:
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [info, low, medium, high, critical]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, acknowledged, resolved]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 1000
+      responses:
+        '200':
+          description: List of alerts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alerts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Alert'
+                  total:
+                    type: integer
+    post:
+      summary: Create alert
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Alert'
+      responses:
+        '201':
+          description: Created alert
+
+  /alerts/{id}:
+    get:
+      summary: Get alert by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Alert details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+    put:
+      summary: Update alert
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Updated alert
+
+  /alerts/{id}/acknowledge:
+    post:
+      summary: Acknowledge alert
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Alert acknowledged
+
+  /events:
+    get:
+      summary: List events
+      responses:
+        '200':
+          description: List of events
+
+  /events/search:
+    post:
+      summary: Search events
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+                start_time:
+                  type: string
+                  format: date-time
+                end_time:
+                  type: string
+                  format: date-time
+                limit:
+                  type: integer
+      responses:
+        '200':
+          description: Search results
+
+  /rules:
+    get:
+      summary: List detection rules
+      responses:
+        '200':
+          description: List of rules
+    post:
+      summary: Create detection rule
+      responses:
+        '201':
+          description: Created rule
+
+  /cases:
+    get:
+      summary: List incident cases
+      responses:
+        '200':
+          description: List of cases
+    post:
+      summary: Create incident case
+      responses:
+        '201':
+          description: Created case
+
+  /dashboards:
+    get:
+      summary: List dashboards
+      responses:
+        '200':
+          description: List of dashboards
+
+  /threat-intel/indicators:
+    get:
+      summary: List threat intelligence indicators
+      responses:
+        '200':
+          description: List of indicators
+
+  /agents:
+    get:
+      summary: List endpoint agents
+      responses:
+        '200':
+          description: List of agents
+
+  /playbooks:
+    get:
+      summary: List SOAR playbooks
+      responses:
+        '200':
+          description: List of playbooks
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Alert:
+      type: object
+      properties:
+        id:
+          type: string
+        rule_id:
+          type: string
+        rule_name:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+          enum: [info, low, medium, high, critical]
+        severity_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        status:
+          type: string
+          enum: [open, acknowledged, resolved]
+        mitre_tactic:
+          type: string
+        mitre_technique:
+          type: string
+        source_ip:
+          type: string
+        destination_ip:
+          type: string
+        host_name:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        match_count:
+          type: integer
+        action:
+          type: string

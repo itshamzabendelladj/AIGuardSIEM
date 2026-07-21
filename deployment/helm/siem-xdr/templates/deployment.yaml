@@ -1,0 +1,42 @@
+{{- range $name, $values := .Values.collectors }}
+{{- if $values.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-collector
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ $name }}-collector
+    component: collector
+spec:
+  replicas: {{ $values.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: {{ $name }}-collector
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}-collector
+        component: collector
+    spec:
+      containers:
+        - name: {{ $name }}-collector
+          image: "{{ $.Values.global.imageRegistry }}aiguard/{{ $name }}-collector:{{ $.Values.image.tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-collector
+  namespace: {{ $.Release.Namespace }}
+spec:
+  selector:
+    app: {{ $name }}-collector
+  ports:
+    - port: 9100
+      name: metrics
+{{- end }}
+{{- end }}

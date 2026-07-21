@@ -1,0 +1,25 @@
+title: SQL Injection Attempt
+id: 16161616-1616-1616-1616-161616161616
+status: stable
+description: Detects SQL injection attempts in HTTP requests
+author: AIGuard Security Team
+license: MIT
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1190
+detection:
+  selection:
+    event.category: network
+    http.request.method|in:
+      - GET
+      - POST
+    url.path|contains:
+      - "' OR "
+      - "UNION SELECT"
+      - "'; DROP"
+      - "1=1"
+      - "xp_cmdshell"
+  condition: selection
+falsepositives:
+  - Security testing tools

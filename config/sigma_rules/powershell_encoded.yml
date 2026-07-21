@@ -1,0 +1,20 @@
+title: Encoded PowerShell Execution
+id: 11111111-1111-1111-1111-111111111111
+status: stable
+description: Detects encoded PowerShell command execution
+author: AIGuard Security Team
+license: MIT
+level: high
+tags:
+  - attack.execution
+  - attack.t1059.001
+detection:
+  selection:
+    process.name: powershell.exe
+    process.command_line|contains:
+      - "-EncodedCommand"
+      - "-enc "
+      - "FromBase64String"
+  condition: selection
+falsepositives:
+  - Legitimate administrative scripts

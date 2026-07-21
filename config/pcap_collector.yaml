@@ -1,0 +1,18 @@
+# AIGuardSIEM PCAP Collector Configuration
+collector:
+  interface: eth0
+  mode: libpcap  # libpcap, dpdk, af_packet, pf_ring
+  bpf_filter: ""
+  worker_threads: 4
+  batch_size: 500
+  batch_timeout_ms: 50
+  extract_flows: true
+  extract_payload: false
+  max_payload_extract: 256
+  ring_buffer_capacity: 262144
+  snapshot_length: 65535
+  promiscuous_mode: true
+
+kafka:
+  brokers: ${KAFKA_BROKERS:-localhost:9092}
+  network_topic: aiguard-network

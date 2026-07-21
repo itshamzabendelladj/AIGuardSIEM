@@ -1,0 +1,24 @@
+title: Port Scan Detection
+id: 5c6d7e8f-9012-3456-7890-abcdef1234567
+status: stable
+description: Detects TCP/UDP port scanning activity
+author: AIGuard Security Team
+license: MIT
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1046
+detection:
+  selection:
+    event.action: connection_attempt
+    destination.port|gte: 1
+  condition: selection
+  timeframe: 1m
+  threshold: 50
+fields:
+  - source.ip
+  - destination.ip
+  - destination.port
+falsepositives:
+  - Network security scanners
+  - Load balancer health checks

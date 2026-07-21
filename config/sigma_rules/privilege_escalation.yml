@@ -1,0 +1,24 @@
+title: Privilege Escalation Attempt
+id: 15151515-1515-1515-1515-151515151515
+status: stable
+description: Detects potential privilege escalation attempts
+author: AIGuard Security Team
+license: MIT
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.t1068
+detection:
+  selection:
+    event.action|in:
+      - setuid
+      - setgid
+    process.name|in:
+      - sudo
+      - su
+      - pkexec
+  condition: selection
+  timeframe: 1m
+  threshold: 5
+falsepositives:
+  - Legitimate administrative privilege changes

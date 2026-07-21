@@ -1,0 +1,27 @@
+# AIGuardSIEM Stream Processor Configuration
+processor:
+  worker_threads: 16
+  batch_size: 500
+  poll_timeout_ms: 100
+  enable_correlation: true
+  enable_windowing: true
+  max_window_events: 1000000
+  correlation_timeout_ms: 5000
+  checkpoint_interval_ms: 10000
+
+kafka:
+  brokers: ${KAFKA_BROKERS:-localhost:9092}
+  input_topics:
+    - aiguard-syslog
+    - aiguard-network
+    - aiguard-netflow
+    - aiguard-winlog
+    - aiguard-endpoint
+    - aiguard-cloud
+  output_topic: aiguard-alerts
+  group_id: aiguard-engine
+
+rules:
+  sigma_rules_dir: /etc/aiguard/sigma_rules
+  auto_reload: true
+  reload_interval_seconds: 300

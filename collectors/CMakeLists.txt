@@ -1,0 +1,5 @@
+add_subdirectory(syslog)
+add_subdirectory(pcap)
+add_subdirectory(netflow)
+add_subdirectory(winlog)
+add_subdirectory(common)

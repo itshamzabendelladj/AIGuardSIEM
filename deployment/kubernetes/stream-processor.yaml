@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stream-processor
+  namespace: aiguard-siem
+  labels:
+    app: stream-processor
+    component: engine
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: stream-processor
+  template:
+    metadata:
+      labels:
+        app: stream-processor
+        component: engine
+    spec:
+      containers:
+        - name: stream-processor
+          image: aiguard/stream-processor:1.0.0
+          ports:
+            - containerPort: 9103
+              name: metrics
+          env:
+            - name: KAFKA_BROKERS
+              value: "kafka:9092"
+            - name: WORKER_THREADS
+              value: "16"
+            - name: SIGMA_RULES_DIR
+              value: "/etc/aiguard/sigma_rules"
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "1"
+            limits:
+              memory: "4Gi"
+              cpu: "4"
+          volumeMounts:
+            - name: sigma-rules
+              mountPath: /etc/aiguard/sigma_rules
+              readOnly: true
+      volumes:
+        - name: sigma-rules
+          configMap:
+            name: sigma-rules
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stream-processor
+  namespace: aiguard-siem
+spec:
+  selector:
+    app: stream-processor
+  ports:
+    - port: 9103
+      targetPort: 9103
+      name: metrics

@@ -1,0 +1,21 @@
+title: C2 Beaconing Pattern
+id: 18181818-1818-1818-1818-181818181818
+status: stable
+description: Detects regular beaconing patterns indicative of C2 communication
+author: AIGuard Security Team
+license: MIT
+level: high
+tags:
+  - attack.command_and_control
+  - attack.t1071
+detection:
+  selection:
+    event.category: network
+    event.action: network_connection
+  condition: selection
+  timeframe: 1m
+  aggregation_field: source.ip
+  threshold: 30
+falsepositives:
+  - Legitimate heartbeats
+  - Monitoring tools

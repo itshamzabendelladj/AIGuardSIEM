@@ -1,0 +1,22 @@
+title: Potential Data Exfiltration
+id: 14141414-1414-1414-1414-141414141414
+status: stable
+description: Detects large data transfers to external destinations
+author: AIGuard Security Team
+license: MIT
+level: high
+tags:
+  - attack.exfiltration
+  - attack.t1041
+detection:
+  selection:
+    event.category: network
+    network.bytes|gte: 104857600
+    destination.ip|not_contains: "10."
+    destination.ip|not_contains: "192.168."
+    destination.ip|not_contains: "172.16."
+  condition: selection
+  timeframe: 10m
+falsepositives:
+  - Legitimate large file transfers
+  - Software updates

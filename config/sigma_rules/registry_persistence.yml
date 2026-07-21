@@ -1,0 +1,20 @@
+title: Registry Persistence Mechanism
+id: 12121212-1212-1212-1212-121212121212
+status: stable
+description: Detects registry modifications for persistence
+author: AIGuard Security Team
+license: MIT
+level: high
+tags:
+  - attack.persistence
+  - attack.t1547.001
+detection:
+  selection:
+    event.action: registry_modified
+    registry.key|contains:
+      - "Run"
+      - "RunOnce"
+      - "StartupApproved"
+  condition: selection
+falsepositives:
+  - Software installation

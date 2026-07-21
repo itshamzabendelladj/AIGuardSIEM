@@ -1,0 +1,22 @@
+title: Cross-Site Scripting Attempt
+id: 17171717-1717-1717-1717-171717171717
+status: stable
+description: Detects XSS attempts in HTTP requests
+author: AIGuard Security Team
+license: MIT
+level: medium
+tags:
+  - attack.initial_access
+  - attack.t1059.007
+detection:
+  selection:
+    event.category: network
+    url.path|contains:
+      - "<script"
+      - "javascript:"
+      - "onerror="
+      - "onload="
+      - "alert("
+  condition: selection
+falsepositives:
+  - Security testing tools

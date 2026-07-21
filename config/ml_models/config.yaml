@@ -1,0 +1,88 @@
+# AIGuardSIEM ML Model Configuration
+models:
+  random_forest:
+    enabled: true
+    model_path: /models/random_forest_ids.onnx
+    weight: 0.4
+    threshold: 0.5
+
+  xgboost:
+    enabled: true
+    model_path: /models/xgboost_ids.onnx
+    weight: 0.35
+    threshold: 0.5
+
+  isolation_forest:
+    enabled: true
+    model_path: /models/isolation_forest.onnx
+    weight: 0.15
+    contamination: 0.1
+
+  lstm_anomaly:
+    enabled: true
+    model_path: /models/lstm_anomaly.onnx
+    weight: 0.10
+    sequence_length: 10
+    reconstruction_threshold: 0.0015
+
+  cnn_payload:
+    enabled: false
+    model_path: /models/cnn_payload.onnx
+    max_payload_size: 1024
+
+ensemble:
+  strategy: weighted
+  voting_threshold: 0.5
+
+inference:
+  runtime: onnx  # onnx, tensorrt
+  device: cpu     # cpu, cuda
+  batch_size: 64
+  num_threads: 8
+  enable_int8: true
+
+  # ONNX Runtime options
+  onnx:
+    intra_op_num_threads: 4
+    inter_op_num_threads: 2
+    execution_mode: sequential  # sequential, parallel
+
+  # TensorRT options (if GPU available)
+  tensorrt:
+    fp16: true
+    int8: false
+    max_workspace_size: 2147483648  # 2GB
+
+training:
+  datasets:
+    - name: CICIDS2017
+      path: /data/CICIDS2017/
+    - name: CSE-CIC-IDS2018
+      path: /data/CSE-CIC-IDS2018/
+    - name: NSL-KDD
+      path: /data/NSL-KDD/
+
+  output_dir: /models/
+  export_onnx: true
+  random_state: 42
+
+  hyperparameters:
+    rf_n_estimators: 100
+    rf_max_depth: null
+    if_n_estimators: 200
+    if_contamination: 0.1
+    lstm_hidden_size: 128
+    lstm_num_layers: 2
+    lstm_epochs: 50
+    cnn_epochs: 30
+
+drift_detection:
+  enabled: true
+  method: psi  # psi, ks_test
+  threshold: 0.2
+  check_interval_hours: 6
+
+online_learning:
+  enabled: false
+  update_interval_hours: 24
+  min_samples_for_update: 1000

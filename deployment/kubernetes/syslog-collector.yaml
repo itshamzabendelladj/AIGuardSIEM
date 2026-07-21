@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: syslog-collector
+  namespace: aiguard-siem
+  labels:
+    app: syslog-collector
+    component: collector
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: syslog-collector
+  template:
+    metadata:
+      labels:
+        app: syslog-collector
+        component: collector
+    spec:
+      containers:
+        - name: syslog-collector
+          image: aiguard/syslog-collector:1.0.0
+          ports:
+            - containerPort: 514
+              protocol: UDP
+              name: syslog-udp
+            - containerPort: 514
+              protocol: TCP
+              name: syslog-tcp
+            - containerPort: 6514
+              protocol: TCP
+              name: syslog-tls
+            - containerPort: 9100
+              name: metrics
+          env:
+            - name: KAFKA_BROKERS
+              value: "kafka:9092"
+            - name: KAFKA_TOPIC
+              value: "aiguard-syslog"
+            - name: COLLECTOR_WORKER_THREADS
+              value: "8"
+            - name: COLLECTOR_BATCH_SIZE
+              value: "2000"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9100
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 9100
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: syslog-collector
+  namespace: aiguard-siem
+spec:
+  selector:
+    app: syslog-collector
+  ports:
+    - port: 514
+      targetPort: 514
+      protocol: UDP
+      name: syslog-udp
+    - port: 514
+      targetPort: 514
+      protocol: TCP
+      name: syslog-tcp
+    - port: 6514
+      targetPort: 6514
+      protocol: TCP
+      name: syslog-tls
+    - port: 9100
+      targetPort: 9100
+      name: metrics
+  type: LoadBalancer

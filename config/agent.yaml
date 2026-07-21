@@ -1,0 +1,35 @@
+# AIGuardSIEM XDR Agent Configuration
+agent:
+  server_url: https://aiguard-server:8443
+  agent_id: ""  # Auto-generated if empty
+  auth_token: ${AIGUARD_AGENT_TOKEN:-}
+  enable_process_monitoring: true
+  enable_file_monitoring: true
+  enable_network_monitoring: true
+  enable_registry_monitoring: true
+  enable_dns_monitoring: true
+  heartbeat_interval_seconds: 30
+  event_batch_size: 500
+  event_batch_timeout_ms: 100
+
+  # Excluded processes (wildcards supported)
+  excluded_processes:
+    - "/usr/sbin/aiguard-*"
+    - "/opt/aiguard/*"
+
+  # Monitored paths for file integrity monitoring
+  monitored_paths:
+    - /etc
+    - /usr/bin
+    - /usr/sbin
+    - /bin
+    - /sbin
+
+  # TLS configuration
+  tls_cert_file: /etc/aiguard/certs/agent.crt
+  tls_key_file: /etc/aiguard/certs/agent.key
+  tls_ca_file: /etc/aiguard/certs/ca.crt
+
+kafka:
+  brokers: ${KAFKA_BROKERS:-localhost:9092}
+  endpoint_topic: aiguard-endpoint

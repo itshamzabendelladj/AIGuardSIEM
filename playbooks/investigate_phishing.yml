@@ -1,0 +1,48 @@
+id: investigate-phishing
+name: Investigate Phishing Email
+description: >
+  Investigates phishing emails by checking URLs against threat intelligence,
+  blocking malicious domains, and notifying affected users.
+enabled: true
+severity_filter:
+  - medium
+  - high
+  - critical
+tags:
+  - phishing
+  - email-security
+  - url-analysis
+
+steps:
+  - id: check_url
+    name: Check URL Against Threat Intel
+    action: query_threat_intel
+    params:
+      indicator: "{url}"
+      type: url
+    store_output: true
+    output_var: url_check
+
+  - id: block_domain
+    name: Block Malicious Domain
+    action: block_ip
+    params:
+      ip: "{domain_ip}"
+      duration: 3600
+    condition: "{url_check.malicious} == true"
+
+  - id: notify_users
+    name: Notify Affected Users
+    action: send_notification
+    params:
+      channel: email
+      message: "Security Alert: Phishing email detected. Do not click links in the email."
+      recipients: "{affected_users}"
+
+  - id: create_case
+    name: Create Investigation Case
+    action: create_ticket
+    params:
+      system: thehive
+      title: "Phishing Investigation - {url}"
+      description: "Automated phishing investigation for URL: {url}"

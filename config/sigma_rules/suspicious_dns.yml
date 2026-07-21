@@ -1,0 +1,22 @@
+title: Suspicious DNS Queries
+id: 13131313-1313-1313-1313-131313131313
+status: stable
+description: Detects DNS queries to suspicious domains
+author: AIGuard Security Team
+license: MIT
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1071.004
+detection:
+  selection:
+    dns.question.name|contains:
+      - ".tk"
+      - ".ml"
+      - ".ga"
+      - ".cf"
+      - "dynamic"
+      - "ddns"
+  condition: selection
+falsepositives:
+  - Legitimate dynamic DNS services

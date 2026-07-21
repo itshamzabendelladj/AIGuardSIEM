@@ -1,0 +1,27 @@
+title: SSH Brute Force Attack
+id: 3a8a4b5c-6d7e-8f90-1234-567890abcdef
+status: stable
+description: Detects multiple failed SSH login attempts from a single source
+author: AIGuard Security Team
+license: MIT
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1110
+  - attack.t1110.001
+logsource:
+  product: linux
+  service: auth
+detection:
+  selection:
+    event.action: ssh_login_failed
+  condition: selection
+  timeframe: 5m
+  threshold: 10
+fields:
+  - source.ip
+  - user.name
+  - host.name
+falsepositives:
+  - Misconfigured SSH clients
+  - Legitimate automated systems with expired credentials

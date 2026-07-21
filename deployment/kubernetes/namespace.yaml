@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aiguard-siem
+  labels:
+    app.kubernetes.io/name: aiguard-siem
+    app.kubernetes.io/part-of: aiguard-siem

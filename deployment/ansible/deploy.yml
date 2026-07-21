@@ -1,0 +1,143 @@
+---
+# AIGuardSIEM Ansible Deployment Playbook
+- name: Deploy AIGuardSIEM Platform
+  hosts: all
+  become: yes
+  vars:
+    aiguard_version: "1.0.0"
+    aiguard_install_dir: "/opt/aiguard"
+    aiguard_config_dir: "/etc/aiguard"
+    aiguard_data_dir: "/var/lib/aiguard"
+
+  tasks:
+    - name: Create AIGuard directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - "{{ aiguard_install_dir }}"
+        - "{{ aiguard_config_dir }}"
+        - "{{ aiguard_data_dir }}"
+        - "{{ aiguard_data_dir }}/hot"
+        - "{{ aiguard_data_dir }}/warm"
+        - "{{ aiguard_config_dir }}/sigma_rules"
+
+    - name: Install dependencies (Ubuntu/Debian)
+      apt:
+        name:
+          - build-essential
+          - cmake
+          - libboost-all-dev
+          - libssl-dev
+          - librdkafka-dev
+          - libpcap-dev
+          - librocksdb-dev
+          - golang
+          - python3.11
+          - python3-pip
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install dependencies (RHEL/CentOS)
+      yum:
+        name:
+          - gcc-c++
+          - cmake
+          - boost-devel
+          - openssl-devel
+          - librdkafka-devel
+          - libpcap-devel
+          - rocksdb-devel
+          - golang
+          - python3
+          - python3-pip
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Copy configuration files
+      copy:
+        src: "../config/"
+        dest: "{{ aiguard_config_dir }}/"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Copy Sigma rules
+      copy:
+        src: "../config/sigma_rules/"
+        dest: "{{ aiguard_config_dir }}/sigma_rules/"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Build C++ components
+      shell: |
+        cd {{ aiguard_install_dir }}
+        mkdir -p build && cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+        make -j$(nproc)
+        make install
+      args:
+        creates: "{{ aiguard_install_dir }}/build/bin/aiguard_syslog_collector"
+
+    - name: Build Go components
+      shell: |
+        cd {{ aiguard_install_dir }}
+        go build -o /usr/local/bin/aiguard-api-gateway ./api/gateway
+        go build -o /usr/local/bin/aiguard-orchestrator ./services/orchestrator
+      args:
+        creates: /usr/local/bin/aiguard-api-gateway
+
+    - name: Install Python ML dependencies
+      pip:
+        requirements: "{{ aiguard_install_dir }}/ml/requirements.txt"
+        executable: pip3
+
+    - name: Create systemd services
+      template:
+        src: "{{ item }}.service.j2"
+        dest: "/etc/systemd/system/{{ item }}.service"
+        owner: root
+        group: root
+        mode: '0644'
+      loop:
+        - aiguard-syslog-collector
+        - aiguard-pcap-collector
+        - aiguard-netflow-collector
+        - aiguard-stream-processor
+        - aiguard-api-gateway
+        - aiguard-ml-inference
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable and start services
+      systemd:
+        name: "{{ item }}"
+        enabled: yes
+        state: started
+      loop:
+        - aiguard-syslog-collector
+        - aiguard-pcap-collector
+        - aiguard-netflow-collector
+        - aiguard-stream-processor
+        - aiguard-api-gateway
+        - aiguard-ml-inference
+
+    - name: Verify services are running
+      systemd:
+        name: "{{ item }}"
+      register: service_status
+      loop:
+        - aiguard-syslog-collector
+        - aiguard-stream-processor
+        - aiguard-api-gateway
+
+    - name: Display service status
+      debug:
+        var: service_status.results

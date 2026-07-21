@@ -1,0 +1,92 @@
+id: isolate-compromised-host
+name: Isolate Compromised Host
+description: >
+  Automatically isolates a compromised host by blocking network traffic,
+  collecting forensic evidence, and creating an incident ticket.
+enabled: true
+severity_filter:
+  - critical
+  - high
+tags:
+  - automated-response
+  - host-isolation
+  - forensic-collection
+trigger:
+  type: alert
+  rule_ids:
+    - ssh_brute_force
+    - malware_detection
+    - lateral_movement
+
+steps:
+  - id: assess
+    name: Assess Alert Severity
+    action: conditional
+    params:
+      condition: "{severity} == 'critical'"
+    on_failure: continue
+
+  - id: query_ti
+    name: Query Threat Intelligence
+    action: query_threat_intel
+    params:
+      indicator: "{source_ip}"
+      type: ip
+    store_output: true
+    output_var: ti_result
+
+  - id: isolate
+    name: Isolate Host
+    action: isolate_host
+    params:
+      host: "{host_name}"
+    on_failure: stop
+
+  - id: block_ip
+    name: Block Malicious IP
+    action: block_ip
+    params:
+      ip: "{source_ip}"
+      duration: 86400
+
+  - id: collect_evidence
+    name: Collect Forensic Evidence
+    action: collect_evidence
+    params:
+      host: "{host_name}"
+      types:
+        - memory
+        - disk
+        - network
+        - process
+
+  - id: kill_malicious
+    name: Terminate Malicious Process
+    action: kill_process
+    params:
+      host: "{host_name}"
+      pid: "{process_pid}"
+    on_failure: continue
+
+  - id: disable_account
+    name: Disable Compromised Account
+    action: disable_account
+    params:
+      account: "{user_name}"
+
+  - id: create_ticket
+    name: Create Incident Ticket
+    action: create_ticket
+    params:
+      system: servicenow
+      title: "AIGuardSIEM: Compromised Host - {host_name}"
+      description: "Automated isolation of compromised host {host_name}"
+
+  - id: notify
+    name: Send Notification
+    action: send_notification
+    params:
+      channel: slack
+      message: "ALERT: Host {host_name} isolated due to {rule_name}. Ticket created."
+      recipients:
+        - soc-team@company.com

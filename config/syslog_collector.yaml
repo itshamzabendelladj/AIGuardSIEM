@@ -1,0 +1,22 @@
+# AIGuardSIEM Syslog Collector Configuration
+collector:
+  udp_port: 514
+  tcp_port: 514
+  tls_port: 6514
+  bind_address: "0.0.0.0"
+  worker_threads: 8
+  batch_size: 2000
+  batch_timeout_ms: 100
+  ring_buffer_capacity: 1048576
+  enable_tls: false
+  tls_cert_file: /etc/aiguard/certs/server.crt
+  tls_key_file: /etc/aiguard/certs/server.key
+  tls_ca_file: /etc/aiguard/certs/ca.crt
+  enable_metrics: true
+  metrics_port: 9100
+  socket_receive_buffer_bytes: 16777216  # 16MB
+  enable_non_blocking: true
+
+kafka:
+  brokers: ${KAFKA_BROKERS:-localhost:9092}
+  syslog_topic: aiguard-syslog

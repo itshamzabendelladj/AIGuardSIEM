@@ -1,0 +1,12 @@
+# AIGuardSIEM NetFlow Collector Configuration
+collector:
+  udp_port: 2055
+  bind_address: "0.0.0.0"
+  worker_threads: 2
+  batch_size: 500
+  batch_timeout_ms: 100
+  ring_buffer_capacity: 262144
+
+kafka:
+  brokers: ${KAFKA_BROKERS:-localhost:9092}
+  netflow_topic: aiguard-netflow

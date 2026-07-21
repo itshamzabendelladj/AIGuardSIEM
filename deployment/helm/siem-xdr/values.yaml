@@ -1,0 +1,110 @@
+# AIGuardSIEM Helm Chart Values
+# Default values for siem-xdr chart
+
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+
+# Image tags
+image:
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+# Collectors
+collectors:
+  syslog:
+    enabled: true
+    replicas: 3
+    resources:
+      requests: { memory: "512Mi", cpu: "500m" }
+      limits: { memory: "2Gi", cpu: "2" }
+  pcap:
+    enabled: true
+    replicas: 2
+  netflow:
+    enabled: true
+    replicas: 2
+  winlog:
+    enabled: true
+    replicas: 2
+
+# Stream Processing Engine
+engine:
+  streamProcessor:
+    enabled: true
+    replicas: 4
+    workerThreads: 16
+    resources:
+      requests: { memory: "1Gi", cpu: "1" }
+      limits: { memory: "4Gi", cpu: "4" }
+  ruleEngine:
+    enabled: true
+    replicas: 2
+
+# ML Inference
+mlInference:
+  enabled: true
+  replicas: 2
+  gpuEnabled: false
+  resources:
+    requests: { memory: "2Gi", cpu: "1" }
+    limits: { memory: "8Gi", cpu: "4" }
+
+# Storage
+storage:
+  hot:
+    enabled: true
+    replicas: 3
+    size: 500Gi
+  warm:
+    enabled: true
+    replicas: 3
+    size: 2Ti
+  cold:
+    enabled: true
+    bucket: "aiguard-cold-storage"
+
+# API Gateway
+apiGateway:
+  enabled: true
+  replicas: 2
+  tls:
+    enabled: true
+  ingress:
+    enabled: true
+    hostname: siem.example.com
+  resources:
+    requests: { memory: "256Mi", cpu: "250m" }
+    limits: { memory: "1Gi", cpu: "1" }
+
+# Visualization
+viz:
+  dashboard:
+    enabled: true
+    replicas: 1
+  backend:
+    enabled: true
+    replicas: 2
+
+# SOAR
+soar:
+  enabled: true
+  replicas: 1
+
+# Service Mesh
+serviceMesh:
+  enabled: false
+
+# Monitoring
+monitoring:
+  prometheus:
+    enabled: true
+  grafana:
+    enabled: true
+
+# Security
+security:
+  jwtSecret: ""  # Set via --set or external secret
+  tlsCert: ""
+  tlsKey: ""

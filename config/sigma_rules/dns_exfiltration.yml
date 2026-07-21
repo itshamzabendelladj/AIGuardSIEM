@@ -1,0 +1,23 @@
+title: DNS Data Exfiltration
+id: 6d7e8f90-1234-5678-90ab-cdef12345678
+status: stable
+description: Detects potential DNS data exfiltration via long query names
+author: AIGuard Security Team
+license: MIT
+level: high
+tags:
+  - attack.exfiltration
+  - attack.t1048
+  - attack.t1048.003
+detection:
+  selection:
+    dns.question.name|contains: "base64"
+  filter:
+    dns.question.name|contains: "google"
+  condition: selection and not filter
+fields:
+  - source.ip
+  - dns.question.name
+  - host.name
+falsepositives:
+  - Legitimate DNS-based services

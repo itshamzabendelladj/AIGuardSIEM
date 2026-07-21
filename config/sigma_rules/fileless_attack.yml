@@ -1,0 +1,24 @@
+title: Fileless Attack Detection
+id: 19191919-1919-1919-1919-191919191919
+status: stable
+description: Detects fileless attack techniques using PowerShell and WMI
+author: AIGuard Security Team
+license: MIT
+level: critical
+tags:
+  - attack.execution
+  - attack.t1105
+  - attack.t1047
+detection:
+  selection:
+    process.name|in:
+      - powershell.exe
+      - wmic.exe
+    process.command_line|contains:
+      - "DownloadString"
+      - "Invoke-Expression"
+      - "IEX"
+      - "process call create"
+  condition: selection
+falsepositives:
+  - Legitimate administrative scripts

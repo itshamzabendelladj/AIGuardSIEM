@@ -1,0 +1,25 @@
+title: RDP Lateral Movement
+id: 7e8f9012-3456-7890-abcd-ef1234567890
+status: stable
+description: Detects RDP connections to multiple internal hosts
+author: AIGuard Security Team
+license: MIT
+level: high
+tags:
+  - attack.lateral_movement
+  - attack.t1021
+  - attack.t1021.001
+detection:
+  selection:
+    event.action: rdp_connection
+    destination.port: 3389
+  condition: selection
+  timeframe: 10m
+  threshold: 5
+fields:
+  - source.ip
+  - destination.ip
+  - user.name
+falsepositives:
+  - Administrative RDP sessions
+  - RDP gateway connections

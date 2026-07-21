@@ -1,0 +1,196 @@
+version: "3.9"
+
+# AIGuardSIEM - Full Stack Development Environment
+# Copyright (c) 2024 AIGuard
+
+services:
+  # === MESSAGE BUS ===
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    hostname: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      CLUSTER_ID: "AIGuardSIEM-Kafka-Cluster"
+
+  # === SERVICE DISCOVERY ===
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.11
+    ports:
+      - "2379:2379"
+    environment:
+      ETCD_LISTEN_CLIENT_URLS: "http://0.0.0.0:2379"
+      ETCD_ADVERTISE_CLIENT_URLS: "http://etcd:2379"
+      ETCD_LISTEN_PEER_URLS: "http://0.0.0.0:2380"
+      ALLOW_NONE_AUTHENTICATION: "yes"
+
+  # === HOT STORAGE ===
+  rocksdb:
+    image: ubuntu:22.04
+    volumes:
+      - hot-data:/var/lib/aiguard/hot
+    command: ["sleep", "infinity"]
+
+  # === WARM STORAGE ===
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - warm-data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_DB: aiguard
+      CLICKHOUSE_USER: aiguard
+      CLICKHOUSE_PASSWORD: aiguard_secret
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+
+  # === COLD STORAGE (MinIO as S3-compatible) ===
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9001:9001"
+    volumes:
+      - cold-data:/data
+    environment:
+      MINIO_ROOT_USER: aiguard
+      MINIO_ROOT_PASSWORD: aiguard_secret
+    command: server /data --console-address ":9001"
+
+  # === COLLECTORS ===
+  syslog-collector:
+    build:
+      context: .
+      dockerfile: docker/syslog-collector.Dockerfile
+    ports:
+      - "514:514/udp"
+      - "514:514/tcp"
+      - "9100:9100"
+    depends_on:
+      - kafka
+    volumes:
+      - ./config/syslog_collector.yaml:/etc/aiguard/syslog_collector.yaml:ro
+    restart: unless-stopped
+
+  pcap-collector:
+    build:
+      context: .
+      dockerfile: docker/pcap-collector.Dockerfile
+    ports:
+      - "9101:9101"
+    depends_on:
+      - kafka
+    volumes:
+      - ./config/pcap_collector.yaml:/etc/aiguard/pcap_collector.yaml:ro
+    network_mode: host  # For packet capture
+    restart: unless-stopped
+
+  netflow-collector:
+    build:
+      context: .
+      dockerfile: docker/netflow-collector.Dockerfile
+    ports:
+      - "2055:2055/udp"
+      - "9102:9102"
+    depends_on:
+      - kafka
+    volumes:
+      - ./config/netflow_collector.yaml:/etc/aiguard/netflow_collector.yaml:ro
+    restart: unless-stopped
+
+  # === STREAM PROCESSING ENGINE ===
+  stream-processor:
+    build:
+      context: .
+      dockerfile: docker/stream-processor.Dockerfile
+    ports:
+      - "9103:9103"
+    depends_on:
+      - kafka
+    volumes:
+      - ./config/stream_processor.yaml:/etc/aiguard/stream_processor.yaml:ro
+      - ./config/sigma_rules:/etc/aiguard/sigma_rules:ro
+    restart: unless-stopped
+
+  # === ML INFERENCE ===
+  ml-inference:
+    build:
+      context: .
+      dockerfile: docker/ml-inference.Dockerfile
+    ports:
+      - "9104:9104"
+    depends_on:
+      - kafka
+    volumes:
+      - ./config/ml_models:/models:ro
+    restart: unless-stopped
+
+  # === API GATEWAY ===
+  api-gateway:
+    build:
+      context: .
+      dockerfile: docker/api-gateway.Dockerfile
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+    depends_on:
+      - etcd
+      - kafka
+    environment:
+      AIGUARD_JWT_SECRET: "${AIGUARD_JWT_SECRET:-dev-secret-key}"
+      AIGUARD_LOG_LEVEL: "debug"
+      AIGUARD_ETCD_ENDPOINTS: "etcd:2379"
+      AIGUARD_KAFKA_BROKERS: "kafka:9092"
+    restart: unless-stopped
+
+  # === VISUALIZATION ===
+  soc-dashboard:
+    build:
+      context: .
+      dockerfile: docker/soc-dashboard.Dockerfile
+    ports:
+      - "8050:8050"
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+
+  viz-backend:
+    build:
+      context: .
+      dockerfile: docker/viz-backend.Dockerfile
+    ports:
+      - "8051:8051"
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+
+  # === SOAR ENGINE ===
+  soar-engine:
+    build:
+      context: .
+      dockerfile: docker/soar-engine.Dockerfile
+    ports:
+      - "9105:9105"
+    depends_on:
+      - kafka
+    volumes:
+      - ./playbooks:/app/playbooks:ro
+    restart: unless-stopped
+
+volumes:
+  hot-data:
+  warm-data:
+  cold-data:
