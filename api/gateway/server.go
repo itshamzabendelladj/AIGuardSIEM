@@ -15,6 +15,7 @@ import (
     "github.com/aiguard/siem-xdr/api/middleware"
     "github.com/aiguard/siem-xdr/services/orchestrator"
     "github.com/prometheus/client_golang/prometheus/promhttp"
+    "github.com/redis/go-redis/v9"
     "go.uber.org/zap"
 )
 
@@ -25,10 +26,11 @@ type ServerConfig struct {
     LogLevel        string
     JWTSecret       string
     AllowedOrigins  []string
-    RateLimitPerMin int
     TLSCertFile     string
     TLSKeyFile      string
     EnableTLS       bool
+    RedisAddr       string
+    RedisPassword   string
 }
 
 // Server is the main API gateway
@@ -38,6 +40,7 @@ type Server struct {
     orchestrator *orchestrator.Orchestrator
     logger      *zap.Logger
     httpServer  *http.Server
+    redisClient *redis.Client
 }
 
 // NewServer creates a new API gateway server
@@ -67,6 +70,16 @@ func NewServer(config ServerConfig) (*Server, error) {
         gin.SetMode(gin.ReleaseMode)
     }
 
+    // Initialize Redis client
+    var redisClient *redis.Client
+    if config.RedisAddr != "" {
+        redisClient = redis.NewClient(&redis.Options{
+            Addr:     config.RedisAddr,
+            Password: config.RedisPassword,
+            DB:       0,
+        })
+    }
+
     router := gin.New()
 
     server := &Server{
@@ -74,6 +87,7 @@ func NewServer(config ServerConfig) (*Server, error) {
         router:       router,
         orchestrator: orch,
         logger:       logger,
+        redisClient:  redisClient,
     }
 
     server.setupRoutes()
@@ -87,7 +101,7 @@ func (s *Server) setupRoutes() {
     s.router.Use(middleware.Logger(s.logger))
     s.router.Use(middleware.Recovery(s.logger))
     s.router.Use(middleware.CORS(s.config.AllowedOrigins))
-    s.router.Use(middleware.RateLimiter(s.config.RateLimitPerMin))
+    s.router.Use(middleware.RateLimiter(s.redisClient, s.config.RateLimitPerMin))
 
     // Health check
     s.router.GET("/health", handlers.HealthCheck)

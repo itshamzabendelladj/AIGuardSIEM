@@ -6,6 +6,7 @@ import (
 
     "github.com/gin-gonic/gin"
     "github.com/google/uuid"
+    "github.com/redis/go-redis/v9"
     "go.uber.org/zap"
 )
 
@@ -94,12 +95,37 @@ func CORS(allowedOrigins []string) gin.HandlerFunc {
     }
 }
 
-// RateLimiter implements simple rate limiting
-func RateLimiter(requestsPerMinute int) gin.HandlerFunc {
-    // Simple in-memory rate limiter
-    // In production, use Redis-based rate limiting
+// RateLimiter implements Redis-based rate limiting per IP
+func RateLimiter(redisClient *redis.Client, requestsPerMinute int) gin.HandlerFunc {
     return func(c *gin.Context) {
-        // TODO: Implement Redis-based rate limiting
+        if redisClient == nil {
+            // Fallback if Redis is not configured
+            c.Next()
+            return
+        }
+
+        ip := c.ClientIP()
+        key := fmt.Sprintf("rate_limit:%s", ip)
+        ctx := c.Request.Context()
+
+        // Increment the counter
+        count, err := redisClient.Incr(ctx, key).Result()
+        if err != nil {
+            // Fallback to allowing request if Redis fails
+            c.Next()
+            return
+        }
+
+        // Set expiry on first request in the window
+        if count == 1 {
+            redisClient.Expire(ctx, key, time.Minute)
+        }
+
+        if int(count) > requestsPerMinute {
+            c.AbortWithStatusJSON(429, gin.H{"error": "Too many requests"})
+            return
+        }
+
         c.Next()
     }
 }
