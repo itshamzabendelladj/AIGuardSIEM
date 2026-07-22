@@ -16,6 +16,17 @@ CorrelationEngine::CorrelationEngine() {
 }
 
 void CorrelationEngine::add_rule(std::unique_ptr<CorrelationRule> rule) {
+    // Pre-compile regexes
+    for (auto& cond : rule->conditions) {
+        if (cond.op == "regex" && !cond.value.empty()) {
+            try {
+                cond.compiled_regex = std::make_shared<std::regex>(cond.value);
+            } catch (const std::regex_error& e) {
+                spdlog::error("Invalid regex in rule {} condition {}: {}", rule->id, cond.field, e.what());
+            }
+        }
+    }
+
     std::lock_guard<std::mutex> lock(rules_mutex_);
     std::string id = rule->id;
     rules_[id] = std::move(rule);
@@ -79,12 +90,14 @@ bool CorrelationEngine::check_condition(const Event& event, const Condition& con
     } else if (cond.op == "endswith") {
         return field_value.ends_with(cond.value);
     } else if (cond.op == "regex") {
-        try {
-            std::regex re(cond.value);
-            return std::regex_search(field_value, re);
-        } catch (...) {
-            return false;
+        if (cond.compiled_regex) {
+            try {
+                return std::regex_search(field_value, *cond.compiled_regex);
+            } catch (...) {
+                return false;
+            }
         }
+        return false;
     } else if (cond.op == "exists") {
         return !field_value.empty();
     } else if (cond.op == ">") {

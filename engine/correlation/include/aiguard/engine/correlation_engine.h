@@ -10,6 +10,7 @@
 #include <functional>
 #include <atomic>
 #include <chrono>
+#include <regex>
 
 namespace aiguard {
 
@@ -18,6 +19,7 @@ struct Condition {
     std::string field;      // Event field to match
     std::string op;         // =, !=, contains, regex, >, <, >=, <=
     std::string value;      // Value to compare against
+    std::shared_ptr<std::regex> compiled_regex; // Cached compiled regex
 };
 
 /// Correlation rule - defines a pattern of events that constitute a threat
