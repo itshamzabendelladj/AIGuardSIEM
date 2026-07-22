@@ -11,6 +11,7 @@
 #include <atomic>
 #include <chrono>
 #include <regex>
+#include <shared_mutex>
 
 namespace aiguard {
 
@@ -128,7 +129,7 @@ private:
 
     // Rule storage
     std::unordered_map<std::string, std::unique_ptr<CorrelationRule>> rules_;
-    mutable std::mutex rules_mutex_;
+    mutable std::shared_mutex rules_mutex_;
 
     // Correlation state: rule_id -> aggregation_key -> [timestamps]
     struct CorrelationState {
