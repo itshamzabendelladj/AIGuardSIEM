@@ -27,14 +27,14 @@ void CorrelationEngine::add_rule(std::unique_ptr<CorrelationRule> rule) {
         }
     }
 
-    std::lock_guard<std::mutex> lock(rules_mutex_);
+    std::lock_guard<std::shared_mutex> lock(rules_mutex_);
     std::string id = rule->id;
     rules_[id] = std::move(rule);
     spdlog::info("Correlation rule added: {} ({})", id, rules_[id]->name);
 }
 
 bool CorrelationEngine::remove_rule(const std::string& rule_id) {
-    std::lock_guard<std::mutex> lock(rules_mutex_);
+    std::lock_guard<std::shared_mutex> lock(rules_mutex_);
     auto it = rules_.find(rule_id);
     if (it == rules_.end()) return false;
     rules_.erase(it);
@@ -164,7 +164,7 @@ bool CorrelationEngine::simd_string_compare(const std::string& a, const std::str
 std::vector<Alert> CorrelationEngine::process_event(const Event& event) {
     std::vector<Alert> alerts;
 
-    std::lock_guard<std::mutex> rules_lock(rules_mutex_);
+    std::shared_lock<std::shared_mutex> rules_lock(rules_mutex_);
     {
         std::lock_guard<std::mutex> stats_lock(stats_mutex_);
         stats_.events_processed++;
@@ -259,7 +259,7 @@ std::vector<Alert> CorrelationEngine::process_events(const std::vector<std::uniq
 }
 
 std::vector<const CorrelationRule*> CorrelationEngine::get_rules() const {
-    std::lock_guard<std::mutex> lock(rules_mutex_);
+    std::shared_lock<std::shared_mutex> lock(rules_mutex_);
     std::vector<const CorrelationRule*> result;
     result.reserve(rules_.size());
     for (const auto& [_, rule] : rules_) {
@@ -269,7 +269,7 @@ std::vector<const CorrelationRule*> CorrelationEngine::get_rules() const {
 }
 
 size_t CorrelationEngine::rule_count() const {
-    std::lock_guard<std::mutex> lock(rules_mutex_);
+    std::shared_lock<std::shared_mutex> lock(rules_mutex_);
     return rules_.size();
 }
 
@@ -280,7 +280,7 @@ void CorrelationEngine::cleanup_expired() {
         // Get timeout for this rule
         int64_t timeout_ms = 60000;  // Default 60s
         {
-            std::lock_guard<std::mutex> rules_lock(rules_mutex_);
+            std::shared_lock<std::shared_mutex> rules_lock(rules_mutex_);
             auto it = rules_.find(rule_id);
             if (it != rules_.end()) {
                 timeout_ms = it->second->time_window_ms;
