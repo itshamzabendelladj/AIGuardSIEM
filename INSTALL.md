@@ -64,6 +64,19 @@ system with Extended Detection and Response (XDR) capabilities.
 
 ## Quick Start
 
+### SOC console (API + dashboard)
+
+```bash
+# Terminal 1 — API gateway
+go run ./api
+# http://localhost:8080  (demo: admin/admin)
+
+# Terminal 2 — SOC dashboard
+cd viz/dashboards
+python soc_realtime.py
+# http://127.0.0.1:8050
+```
+
 ### Docker Compose
 ```bash
 docker-compose up -d
