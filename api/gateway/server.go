@@ -3,7 +3,6 @@ package gateway
 import (
     "context"
     "fmt"
-    "log"
     "net/http"
     "os"
     "os/signal"
@@ -89,7 +88,17 @@ func (s *Server) setupRoutes() {
     s.router.Use(middleware.CORS(s.config.AllowedOrigins))
     s.router.Use(middleware.RateLimiter(s.config.RateLimitPerMin))
 
-    // Health check
+    // Root + health
+    s.router.GET("/", func(c *gin.Context) {
+        c.JSON(200, gin.H{
+            "name":    "AIGuardSIEM API Gateway",
+            "version": "1.0.0",
+            "docs":    "/health",
+            "api":     "/api/v1",
+            "login":   "POST /api/v1/auth/login",
+            "demo_users": []string{"admin/admin", "analyst/analyst"},
+        })
+    })
     s.router.GET("/health", handlers.HealthCheck)
     s.router.GET("/ready", handlers.ReadinessCheck(s.orchestrator))
 
@@ -103,7 +112,7 @@ func (s *Server) setupRoutes() {
         auth := v1.Group("/auth")
         {
             auth.POST("/login", handlers.Login(s.config.JWTSecret))
-            auth.POST("/refresh", handlers.RefreshToken(s.config.JWTSecret))
+            auth.POST("/refresh", middleware.Auth(s.config.JWTSecret), handlers.RefreshToken(s.config.JWTSecret))
             auth.POST("/logout", middleware.Auth(s.config.JWTSecret), handlers.Logout)
         }
 

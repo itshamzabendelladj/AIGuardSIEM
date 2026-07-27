@@ -5,28 +5,43 @@ from __future__ import annotations
 import json
 import logging
 import os
-import urllib.error
-import urllib.request
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import datetime, timedelta
+from typing import Any
 
 import numpy as np
+
+from api_client import (
+    API_BASE,
+    DEMO_USER,
+    DEMO_PASS,
+    ack_alert,
+    create_case_from_alert,
+    execute_playbook,
+    fetch_agents,
+    fetch_alerts,
+    fetch_cases,
+    fetch_event_agg,
+    fetch_events,
+    fetch_playbooks,
+    fetch_rules,
+    fetch_services,
+    health_ping,
+    reload_rules,
+    resolve_alert,
+    set_agent_isolation,
+)
 
 logger = logging.getLogger(__name__)
 
 try:
     import dash
-    from dash import dcc, html, Input, Output, State, ALL, ctx, no_update
+    from dash import dcc, html, Input, Output, ALL, ctx, no_update
     import plotly.graph_objects as go
 
     DASH_AVAILABLE = True
 except ImportError:
     DASH_AVAILABLE = False
 
-
-API_BASE = os.getenv("AIGUARD_API_URL", "http://localhost:8080")
-DEMO_USER = os.getenv("AIGUARD_DEMO_USER", "admin")
-DEMO_PASS = os.getenv("AIGUARD_DEMO_PASS", "admin")
 
 _RNG = np.random.default_rng(42)
 _EPS_BASE = _RNG.integers(42000, 52000, size=30).astype(float)
@@ -49,11 +64,13 @@ SEVERITY_COLORS = {
 
 PAGES = {
     "/": ("Overview", "Live detection posture and pipeline health"),
-    "/alerts": ("Alerts", "Triage, filter, and acknowledge detections"),
-    "/events": ("Events", "Normalized security event stream"),
+    "/alerts": ("Alerts", "Triage detections and open response cases"),
+    "/events": ("Events", "Normalized security event stream from the API"),
     "/cases": ("Cases", "Incident response caseboard"),
-    "/mitre": ("MITRE ATT&CK", "Technique coverage and hit density"),
-    "/agents": ("Agents", "Endpoint XDR agent inventory"),
+    "/rules": ("Detection rules", "Sigma/correlation rules driving the engine"),
+    "/response": ("Response", "SOAR playbooks linked to automated actions"),
+    "/mitre": ("MITRE ATT&CK", "Technique coverage from live alerts"),
+    "/agents": ("Agents", "Endpoint XDR agents — isolate / restore"),
     "/system": ("System", "Service registry and platform status"),
     "/settings": ("Settings", "Console and API configuration"),
 }
@@ -65,232 +82,22 @@ NAV = [
         ("/events", "03", "Events"),
         ("/cases", "04", "Cases"),
     ]),
-    ("INTEL", [
-        ("/mitre", "05", "MITRE"),
-        ("/agents", "06", "Agents"),
+    ("DETECT & RESPOND", [
+        ("/rules", "05", "Rules"),
+        ("/response", "06", "Response"),
+        ("/mitre", "07", "MITRE"),
+        ("/agents", "08", "Agents"),
     ]),
     ("PLATFORM", [
-        ("/system", "07", "System"),
-        ("/settings", "08", "Settings"),
+        ("/system", "09", "System"),
+        ("/settings", "10", "Settings"),
     ]),
 ]
 
 
 # ---------------------------------------------------------------------------
-# API / demo data helpers
+# Shared UI helpers
 # ---------------------------------------------------------------------------
-
-def _api_request(method: str, path: str, token: Optional[str] = None, body: Any = None) -> Any:
-    data = None if body is None else json.dumps(body).encode()
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(
-        f"{API_BASE}{path}",
-        data=data,
-        headers=headers,
-        method=method,
-    )
-    with urllib.request.urlopen(req, timeout=2.5) as resp:
-        raw = resp.read().decode()
-        return json.loads(raw) if raw else {}
-
-
-def _api_login() -> Optional[str]:
-    try:
-        data = _api_request("POST", "/api/v1/auth/login", body={"username": DEMO_USER, "password": DEMO_PASS})
-        return data.get("token")
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("API login unavailable: %s", exc)
-        return None
-
-
-def _fetch_alerts() -> tuple[list[dict[str, Any]], str]:
-    token = _api_login()
-    if not token:
-        return _demo_alerts(), "demo"
-    try:
-        data = _api_request("GET", "/api/v1/alerts", token=token)
-        alerts = data.get("alerts") or []
-        return (alerts, "api") if alerts else (_demo_alerts(), "demo")
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("API alerts unavailable: %s", exc)
-        return _demo_alerts(), "demo"
-
-
-def _fetch_services() -> tuple[list[dict[str, Any]], str]:
-    token = _api_login()
-    if not token:
-        return _demo_services(), "demo"
-    try:
-        data = _api_request("GET", "/api/v1/system/services", token=token)
-        services = data.get("services") or []
-        return (services, "api") if services else (_demo_services(), "demo")
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("API services unavailable: %s", exc)
-        return _demo_services(), "demo"
-
-
-def _ack_alert(alert_id: str) -> bool:
-    token = _api_login()
-    if not token:
-        return False
-    try:
-        _api_request("POST", f"/api/v1/alerts/{alert_id}/acknowledge", token=token)
-        return True
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Ack failed: %s", exc)
-        return False
-
-
-def _demo_alerts() -> list[dict[str, Any]]:
-    now = datetime.now(timezone.utc)
-    return [
-        {
-            "id": "demo-ssh-001",
-            "severity": "high",
-            "rule_name": "SSH Brute Force Attack",
-            "source_ip": "203.0.113.45",
-            "host_name": "bastion-01",
-            "user_name": "root",
-            "status": "open",
-            "mitre_tactic": "Credential Access",
-            "mitre_technique": "T1110",
-            "timestamp": (now - timedelta(minutes=12)).isoformat(),
-        },
-        {
-            "id": "demo-scan-002",
-            "severity": "medium",
-            "rule_name": "Port Scan Detected",
-            "source_ip": "198.51.100.10",
-            "host_name": "fw-edge-01",
-            "user_name": "",
-            "status": "open",
-            "mitre_tactic": "Discovery",
-            "mitre_technique": "T1046",
-            "timestamp": (now - timedelta(minutes=45)).isoformat(),
-        },
-        {
-            "id": "demo-ps-003",
-            "severity": "critical",
-            "rule_name": "Encoded PowerShell Command",
-            "source_ip": "10.0.3.88",
-            "host_name": "ws-finance-14",
-            "user_name": "jdoe",
-            "status": "acknowledged",
-            "mitre_tactic": "Execution",
-            "mitre_technique": "T1059.001",
-            "timestamp": (now - timedelta(hours=2)).isoformat(),
-        },
-        {
-            "id": "demo-dns-004",
-            "severity": "high",
-            "rule_name": "Suspicious DNS Tunneling",
-            "source_ip": "10.0.5.21",
-            "host_name": "dev-laptop-09",
-            "user_name": "asmith",
-            "status": "open",
-            "mitre_tactic": "Exfiltration",
-            "mitre_technique": "T1048",
-            "timestamp": (now - timedelta(minutes=8)).isoformat(),
-        },
-        {
-            "id": "demo-lat-005",
-            "severity": "medium",
-            "rule_name": "Lateral Movement via RDP",
-            "source_ip": "10.0.2.15",
-            "host_name": "dc-01",
-            "user_name": "svc_backup",
-            "status": "open",
-            "mitre_tactic": "Lateral Movement",
-            "mitre_technique": "T1021.001",
-            "timestamp": (now - timedelta(minutes=33)).isoformat(),
-        },
-    ]
-
-
-def _demo_events() -> list[dict[str, Any]]:
-    now = datetime.now(timezone.utc)
-    rows = []
-    samples = [
-        ("authentication", "ssh_login_failed", "203.0.113.45", "bastion-01", "high"),
-        ("network", "port_scan", "198.51.100.10", "fw-edge-01", "medium"),
-        ("process", "powershell_encoded", "10.0.3.88", "ws-finance-14", "critical"),
-        ("dns", "suspicious_query", "10.0.5.21", "dev-laptop-09", "high"),
-        ("authentication", "rdp_login", "10.0.2.15", "dc-01", "medium"),
-        ("file", "sensitive_file_access", "10.0.8.44", "fileserver-02", "low"),
-        ("network", "egress_spike", "10.0.5.21", "proxy-01", "medium"),
-        ("process", "rare_binary", "10.0.9.3", "build-agent-2", "high"),
-    ]
-    for i, (cat, action, sip, host, sev) in enumerate(samples):
-        rows.append(
-            {
-                "id": f"evt-{1000 + i}",
-                "timestamp": (now - timedelta(minutes=3 * i)).isoformat(),
-                "category": cat,
-                "action": action,
-                "source_ip": sip,
-                "host_name": host,
-                "severity": sev,
-                "source_type": "syslog" if i % 2 == 0 else "endpoint",
-            }
-        )
-    return rows
-
-
-def _demo_cases() -> list[dict[str, Any]]:
-    now = datetime.now(timezone.utc)
-    return [
-        {
-            "id": "CASE-1042",
-            "title": "Suspected credential stuffing on bastion",
-            "severity": "high",
-            "status": "investigating",
-            "assigned_to": "analyst",
-            "alert_count": 12,
-            "updated_at": (now - timedelta(minutes=18)).isoformat(),
-        },
-        {
-            "id": "CASE-1041",
-            "title": "Encoded PowerShell on finance workstation",
-            "severity": "critical",
-            "status": "open",
-            "assigned_to": "admin",
-            "alert_count": 3,
-            "updated_at": (now - timedelta(hours=1)).isoformat(),
-        },
-        {
-            "id": "CASE-1038",
-            "title": "Outbound DNS anomaly cluster",
-            "severity": "medium",
-            "status": "contained",
-            "assigned_to": "analyst",
-            "alert_count": 7,
-            "updated_at": (now - timedelta(hours=5)).isoformat(),
-        },
-    ]
-
-
-def _demo_agents() -> list[dict[str, Any]]:
-    return [
-        {"id": "ag-01", "hostname": "bastion-01", "os": "Linux", "version": "1.0.4", "status": "active"},
-        {"id": "ag-02", "hostname": "ws-finance-14", "os": "Windows", "version": "1.0.4", "status": "active"},
-        {"id": "ag-03", "hostname": "dc-01", "os": "Windows", "version": "1.0.3", "status": "active"},
-        {"id": "ag-04", "hostname": "dev-laptop-09", "os": "macOS", "version": "1.0.4", "status": "active"},
-        {"id": "ag-05", "hostname": "build-agent-2", "os": "Linux", "version": "1.0.2", "status": "isolated"},
-        {"id": "ag-06", "hostname": "fileserver-02", "os": "Linux", "version": "1.0.4", "status": "active"},
-    ]
-
-
-def _demo_services() -> list[dict[str, Any]]:
-    return [
-        {"name": "api-gateway", "port": 8080, "status": "registered", "health": "healthy"},
-        {"name": "syslog-collector", "port": 514, "status": "registered", "health": "healthy"},
-        {"name": "stream-processor", "port": 9090, "status": "registered", "health": "healthy"},
-        {"name": "ml-inference", "port": 9092, "status": "registered", "health": "degraded"},
-        {"name": "soar-engine", "port": 9096, "status": "registered", "health": "healthy"},
-    ]
-
 
 def _fmt_time(value: Any) -> str:
     if not value:
@@ -465,6 +272,8 @@ if DASH_AVAILABLE:
                                             self._page_alerts(),
                                             self._page_events(),
                                             self._page_cases(),
+                                            self._page_rules(),
+                                            self._page_response(),
                                             self._page_mitre(),
                                             self._page_agents(),
                                             self._page_system(),
@@ -538,7 +347,7 @@ if DASH_AVAILABLE:
                                     html.Div(
                                         [
                                             html.H3("Priority queue", className="panel-title"),
-                                            html.P("Top open alerts", className="panel-caption"),
+                                            html.P("Top open alerts from API", className="panel-caption"),
                                         ],
                                         className="panel-head",
                                     ),
@@ -546,6 +355,24 @@ if DASH_AVAILABLE:
                                 ],
                                 className="panel pad-more",
                             ),
+                            html.Div(
+                                [
+                                    html.Div(
+                                        [
+                                            html.H3("Event categories", className="panel-title"),
+                                            html.P("From /events/aggregate", className="panel-caption"),
+                                        ],
+                                        className="panel-head",
+                                    ),
+                                    dcc.Graph(id="event-category-chart", config={"displayModeBar": False}),
+                                ],
+                                className="panel",
+                            ),
+                        ],
+                        className="panel-grid",
+                    ),
+                    html.Div(
+                        [
                             html.Div(
                                 [
                                     html.Div(
@@ -559,8 +386,30 @@ if DASH_AVAILABLE:
                                 ],
                                 className="panel",
                             ),
+                            html.Div(
+                                [
+                                    html.Div(
+                                        [
+                                            html.H3("Pipeline link map", className="panel-title"),
+                                            html.P("How console actions hit the platform", className="panel-caption"),
+                                        ],
+                                        className="panel-head",
+                                    ),
+                                    html.Div(
+                                        [
+                                            html.P("Alerts → Cases / Playbooks", className="kpi-hint"),
+                                            html.P("Events → Aggregation & MITRE", className="kpi-hint"),
+                                            html.P("Agents → Isolate (XDR response)", className="kpi-hint"),
+                                            html.P("Rules → Sigma catalog reload", className="kpi-hint"),
+                                            html.P("System → Orchestrator registry", className="kpi-hint"),
+                                        ],
+                                        style={"padding": "0.5rem 0.25rem 1rem"},
+                                    ),
+                                ],
+                                className="panel pad-more",
+                            ),
                         ],
-                        className="panel-grid",
+                        className="panel-grid equal",
                     ),
                 ],
                 id="page-overview",
@@ -677,18 +526,19 @@ if DASH_AVAILABLE:
         def _page_cases(self) -> html.Div:
             return html.Div(
                 [
+                    html.Div(id="cases-source"),
                     html.Div(
                         [
                             html.Div(
-                                [html.H3("Open", className=""), html.P("0", id="case-stat-open")],
+                                [html.H3("Open"), html.P("0", id="case-stat-open")],
                                 className="stat-card",
                             ),
                             html.Div(
-                                [html.H3("Investigating", className=""), html.P("0", id="case-stat-invest")],
+                                [html.H3("Investigating"), html.P("0", id="case-stat-invest")],
                                 className="stat-card",
                             ),
                             html.Div(
-                                [html.H3("Contained", className=""), html.P("0", id="case-stat-contained")],
+                                [html.H3("Contained / closed"), html.P("0", id="case-stat-contained")],
                                 className="stat-card",
                             ),
                         ],
@@ -699,7 +549,7 @@ if DASH_AVAILABLE:
                             html.Div(
                                 [
                                     html.H3("Caseboard", className="panel-title"),
-                                    html.P("Incident response tracking", className="panel-caption"),
+                                    html.P("Cases linked to alert IDs from the API", className="panel-caption"),
                                 ],
                                 className="panel-head",
                             ),
@@ -709,6 +559,58 @@ if DASH_AVAILABLE:
                     ),
                 ],
                 id="page-cases",
+                className="page",
+            )
+
+        def _page_rules(self) -> html.Div:
+            return html.Div(
+                [
+                    html.Div(id="rules-source"),
+                    html.Div(
+                        [
+                            html.Button("Reload rules", id="rules-reload-btn", className="btn btn-primary", n_clicks=0),
+                            html.Span(id="rules-action-feedback", style={"fontSize": "0.8rem"}),
+                        ],
+                        className="toolbar",
+                    ),
+                    html.Div(
+                        [
+                            html.Div(
+                                [
+                                    html.H3("Detection rules", className="panel-title"),
+                                    html.P("Sigma catalog exposed by /api/v1/rules", className="panel-caption"),
+                                ],
+                                className="panel-head",
+                            ),
+                            html.Div(id="rules-table", className="table-wrap"),
+                        ],
+                        className="panel pad-more panel-full",
+                    ),
+                ],
+                id="page-rules",
+                className="page",
+            )
+
+        def _page_response(self) -> html.Div:
+            return html.Div(
+                [
+                    html.Div(id="playbooks-source"),
+                    html.Div(id="playbook-action-feedback", style={"marginBottom": "0.75rem", "fontSize": "0.85rem"}),
+                    html.Div(
+                        [
+                            html.Div(
+                                [
+                                    html.H3("SOAR playbooks", className="panel-title"),
+                                    html.P("Execute playbooks that drive host isolation / IR workflows", className="panel-caption"),
+                                ],
+                                className="panel-head",
+                            ),
+                            html.Div(id="playbooks-table", className="table-wrap"),
+                        ],
+                        className="panel pad-more panel-full",
+                    ),
+                ],
+                id="page-response",
                 className="page",
             )
 
@@ -767,6 +669,8 @@ if DASH_AVAILABLE:
         def _page_agents(self) -> html.Div:
             return html.Div(
                 [
+                    html.Div(id="agents-source"),
+                    html.Div(id="agent-action-feedback", style={"marginBottom": "0.75rem", "fontSize": "0.85rem"}),
                     html.Div(id="agents-grid", className="agent-grid"),
                 ],
                 id="page-agents",
@@ -870,6 +774,8 @@ if DASH_AVAILABLE:
                 "page-alerts",
                 "page-events",
                 "page-cases",
+                "page-rules",
+                "page-response",
                 "page-mitre",
                 "page-agents",
                 "page-system",
@@ -880,6 +786,8 @@ if DASH_AVAILABLE:
                 "/alerts": "page-alerts",
                 "/events": "page-events",
                 "/cases": "page-cases",
+                "/rules": "page-rules",
+                "/response": "page-response",
                 "/mitre": "page-mitre",
                 "/agents": "page-agents",
                 "/system": "page-system",
@@ -931,7 +839,7 @@ if DASH_AVAILABLE:
                 ],
             )
             def update_alert_driven(n, sev_filter, status_filter, _refresh, search):
-                alerts, source = _fetch_alerts()
+                alerts, source = fetch_alerts()
                 search = (search or "").strip().lower()
 
                 openish = [
@@ -980,15 +888,16 @@ if DASH_AVAILABLE:
                     ]
 
                 banner = html.Div(
-                    "Connected to API gateway."
+                    "Connected to API gateway — alerts/cases/agents/rules share one store."
                     if is_api
-                    else "API offline — demo alerts. Start with: go run ./api",
+                    else "API offline — local demo fallback. Start with: go run ./api",
                     className="source-banner" + ("" if is_api else " demo"),
                 )
 
                 alert_rows = []
                 for a in filtered:
                     aid = str(a.get("id", ""))
+                    status = str(a.get("status", "open")).lower()
                     alert_rows.append(
                         html.Tr(
                             [
@@ -998,22 +907,40 @@ if DASH_AVAILABLE:
                                 html.Td(a.get("source_ip") or "—", className="mono"),
                                 html.Td(a.get("host_name") or "—"),
                                 html.Td(a.get("mitre_technique") or "—", className="mono"),
-                                html.Td(str(a.get("status", "open")), className="status-chip"),
+                                html.Td(status, className="status-chip"),
                                 html.Td(_fmt_time(a.get("timestamp"))[-8:], className="mono"),
                                 html.Td(
-                                    html.Button(
-                                        "Ack",
-                                        id={"type": "ack-btn", "index": aid},
-                                        className="btn btn-ghost",
-                                        n_clicks=0,
-                                        disabled=str(a.get("status", "")).lower() != "open",
+                                    html.Div(
+                                        [
+                                            html.Button(
+                                                "Ack",
+                                                id={"type": "ack-btn", "index": aid},
+                                                className="btn btn-ghost",
+                                                n_clicks=0,
+                                                disabled=status != "open",
+                                            ),
+                                            html.Button(
+                                                "Case",
+                                                id={"type": "case-btn", "index": aid},
+                                                className="btn btn-ghost",
+                                                n_clicks=0,
+                                            ),
+                                            html.Button(
+                                                "Resolve",
+                                                id={"type": "resolve-btn", "index": aid},
+                                                className="btn btn-ghost",
+                                                n_clicks=0,
+                                                disabled=status == "resolved",
+                                            ),
+                                        ],
+                                        style={"display": "flex", "gap": "0.25rem", "flexWrap": "wrap"},
                                     )
                                 ),
                             ]
                         )
                     )
                 alerts_table = _table(
-                    ["ID", "Severity", "Rule", "Source", "Host", "MITRE", "Status", "Time", ""],
+                    ["ID", "Severity", "Rule", "Source", "Host", "MITRE", "Status", "Time", "Actions"],
                     alert_rows,
                 )
 
@@ -1046,23 +973,40 @@ if DASH_AVAILABLE:
 
             @self.app.callback(
                 Output("ack-feedback", "children"),
-                Input({"type": "ack-btn", "index": ALL}, "n_clicks"),
+                [
+                    Input({"type": "ack-btn", "index": ALL}, "n_clicks"),
+                    Input({"type": "case-btn", "index": ALL}, "n_clicks"),
+                    Input({"type": "resolve-btn", "index": ALL}, "n_clicks"),
+                ],
                 prevent_initial_call=True,
             )
-            def acknowledge(n_clicks_list):
-                if not n_clicks_list or not any(n_clicks_list):
+            def alert_actions(_ack, _case, _resolve):
+                if not ctx.triggered_id:
                     return no_update
-                triggered = ctx.triggered_id
-                if not triggered:
-                    return no_update
-                alert_id = triggered.get("index")
-                ok = _ack_alert(alert_id)
-                if ok:
-                    return html.Span(f"Acknowledged {alert_id}", style={"color": "#15803d"})
-                return html.Span(
-                    f"Could not ack {alert_id} (API offline or already handled)",
-                    style={"color": "#b45309"},
-                )
+                alert_id = ctx.triggered_id.get("index")
+                action = ctx.triggered_id.get("type")
+                alerts, _ = fetch_alerts()
+                alert = next((a for a in alerts if str(a.get("id")) == str(alert_id)), {"id": alert_id})
+                if action == "ack-btn":
+                    ok, msg = ack_alert(alert_id)
+                elif action == "case-btn":
+                    ok, msg = create_case_from_alert(alert)
+                else:
+                    ok, msg = resolve_alert(alert_id)
+                color = "#15803d" if ok else "#b45309"
+                return html.Span(msg, style={"color": color})
+
+            @self.app.callback(
+                Output("event-category-chart", "figure"),
+                Input("refresh-interval", "n_intervals"),
+            )
+            def event_category_chart(_n):
+                buckets, _ = fetch_event_agg("category")
+                keys = [str(b.get("key")) for b in buckets]
+                vals = [int(b.get("count") or 0) for b in buckets]
+                fig = go.Figure(go.Bar(x=keys, y=vals, marker_color="#0f6b6b"))
+                fig.update_layout(showlegend=False, yaxis_title="Events")
+                return _apply_chart_style(fig, 280)
 
             @self.app.callback(
                 Output("events-time-chart", "figure"),
@@ -1105,23 +1049,23 @@ if DASH_AVAILABLE:
                 ],
             )
             def events_table(_n, query, category, global_search):
-                events = _demo_events()
-                q = ((query or "") + " " + (global_search or "")).strip().lower()
+                q = ((query or "") + " " + (global_search or "")).strip()
+                events, source = fetch_events(q=q, category=category or "all")
                 if category and category != "all":
                     events = [e for e in events if e.get("category") == category]
-                if q.strip():
-                    events = [e for e in events if q.strip() in json.dumps(e).lower()]
+                if q:
+                    events = [e for e in events if q.lower() in json.dumps(e).lower()]
                 rows = [
                     html.Tr(
                         [
-                            html.Td(e["id"], className="mono"),
-                            html.Td(_sev_badge(e["severity"])),
-                            html.Td(e["category"]),
-                            html.Td(e["action"], className="mono"),
-                            html.Td(e["source_ip"], className="mono"),
-                            html.Td(e["host_name"]),
-                            html.Td(e["source_type"]),
-                            html.Td(_fmt_time(e["timestamp"])[-8:], className="mono"),
+                            html.Td(e.get("id"), className="mono"),
+                            html.Td(_sev_badge(str(e.get("severity", "")))),
+                            html.Td(e.get("category")),
+                            html.Td(e.get("action"), className="mono"),
+                            html.Td(e.get("source_ip"), className="mono"),
+                            html.Td(e.get("host_name")),
+                            html.Td(e.get("source_type")),
+                            html.Td(_fmt_time(e.get("timestamp"))[-8:], className="mono"),
                         ]
                     )
                     for e in events
@@ -1137,30 +1081,127 @@ if DASH_AVAILABLE:
                     Output("case-stat-open", "children"),
                     Output("case-stat-invest", "children"),
                     Output("case-stat-contained", "children"),
+                    Output("cases-source", "children"),
                 ],
                 Input("refresh-interval", "n_intervals"),
             )
             def cases_page(_n):
-                cases = _demo_cases()
+                cases, source = fetch_cases()
                 rows = [
                     html.Tr(
                         [
-                            html.Td(c["id"], className="mono"),
-                            html.Td(_sev_badge(c["severity"])),
-                            html.Td(c["title"]),
-                            html.Td(c["status"], className="status-chip"),
-                            html.Td(c["assigned_to"]),
-                            html.Td(str(c["alert_count"])),
-                            html.Td(_fmt_time(c["updated_at"])[-8:], className="mono"),
+                            html.Td(c.get("id"), className="mono"),
+                            html.Td(_sev_badge(str(c.get("severity", "")))),
+                            html.Td(c.get("title")),
+                            html.Td(c.get("status"), className="status-chip"),
+                            html.Td(c.get("assigned_to")),
+                            html.Td(", ".join(c.get("alert_ids") or []) or str(c.get("alert_count", 0)), className="mono"),
+                            html.Td(_fmt_time(c.get("updated_at"))[-8:], className="mono"),
                         ]
                     )
                     for c in cases
                 ]
+                banner = html.Div(
+                    "Cases from API store (linked to alert IDs)."
+                    if source == "api"
+                    else "Demo cases (API offline).",
+                    className="source-banner" + ("" if source == "api" else " demo"),
+                )
                 return (
                     _table(["ID", "Sev", "Title", "Status", "Owner", "Alerts", "Updated"], rows),
-                    str(sum(1 for c in cases if c["status"] == "open")),
-                    str(sum(1 for c in cases if c["status"] == "investigating")),
-                    str(sum(1 for c in cases if c["status"] == "contained")),
+                    str(sum(1 for c in cases if c.get("status") == "open")),
+                    str(sum(1 for c in cases if c.get("status") == "investigating")),
+                    str(sum(1 for c in cases if c.get("status") in ("contained", "closed"))),
+                    banner,
+                )
+
+            @self.app.callback(
+                [
+                    Output("rules-table", "children"),
+                    Output("rules-source", "children"),
+                    Output("rules-action-feedback", "children"),
+                ],
+                [
+                    Input("refresh-interval", "n_intervals"),
+                    Input("rules-reload-btn", "n_clicks"),
+                ],
+            )
+            def rules_page(_n, reload_clicks):
+                feedback = ""
+                if ctx.triggered_id == "rules-reload-btn" and reload_clicks:
+                    ok, msg = reload_rules()
+                    feedback = html.Span(msg, style={"color": "#15803d" if ok else "#b45309"})
+                rules, source = fetch_rules()
+                rows = [
+                    html.Tr(
+                        [
+                            html.Td(r.get("id"), className="mono"),
+                            html.Td(r.get("name")),
+                            html.Td(_sev_badge(str(r.get("severity", "")))),
+                            html.Td(r.get("type") or "sigma"),
+                            html.Td(r.get("status"), className="status-chip"),
+                            html.Td(r.get("mitre_technique") or "—", className="mono"),
+                            html.Td(", ".join(r.get("tags") or [])),
+                        ]
+                    )
+                    for r in rules
+                ]
+                banner = html.Div(
+                    "Rules mirror config/sigma_rules via API."
+                    if source == "api"
+                    else "Demo rules (API offline).",
+                    className="source-banner" + ("" if source == "api" else " demo"),
+                )
+                return _table(["ID", "Name", "Sev", "Type", "Status", "MITRE", "Tags"], rows), banner, feedback
+
+            @self.app.callback(
+                [
+                    Output("playbooks-table", "children"),
+                    Output("playbooks-source", "children"),
+                    Output("playbook-action-feedback", "children"),
+                ],
+                [
+                    Input("refresh-interval", "n_intervals"),
+                    Input({"type": "run-playbook", "index": ALL}, "n_clicks"),
+                ],
+            )
+            def playbooks_page(_n, _clicks):
+                feedback = ""
+                if ctx.triggered_id and isinstance(ctx.triggered_id, dict) and ctx.triggered_id.get("type") == "run-playbook":
+                    ok, msg = execute_playbook(ctx.triggered_id.get("index"))
+                    feedback = html.Span(msg, style={"color": "#15803d" if ok else "#b45309"})
+                playbooks, source = fetch_playbooks()
+                rows = [
+                    html.Tr(
+                        [
+                            html.Td(p.get("id"), className="mono"),
+                            html.Td(p.get("name")),
+                            html.Td(p.get("description")),
+                            html.Td("yes" if p.get("enabled") else "no"),
+                            html.Td(", ".join(p.get("tags") or [])),
+                            html.Td(p.get("status") or "idle", className="status-chip"),
+                            html.Td(
+                                html.Button(
+                                    "Run",
+                                    id={"type": "run-playbook", "index": p.get("id")},
+                                    className="btn btn-primary",
+                                    n_clicks=0,
+                                )
+                            ),
+                        ]
+                    )
+                    for p in playbooks
+                ]
+                banner = html.Div(
+                    "Playbooks from /api/v1/playbooks (aligned with playbooks/*.yml)."
+                    if source == "api"
+                    else "Demo playbooks (API offline).",
+                    className="source-banner" + ("" if source == "api" else " demo"),
+                )
+                return (
+                    _table(["ID", "Name", "Description", "Enabled", "Tags", "Status", ""], rows),
+                    banner,
+                    feedback,
                 )
 
             @self.app.callback(
@@ -1252,25 +1293,69 @@ if DASH_AVAILABLE:
                 return fig
 
             @self.app.callback(
-                Output("agents-grid", "children"),
-                Input("refresh-interval", "n_intervals"),
+                [
+                    Output("agents-grid", "children"),
+                    Output("agents-source", "children"),
+                    Output("agent-action-feedback", "children"),
+                ],
+                [
+                    Input("refresh-interval", "n_intervals"),
+                    Input({"type": "agent-iso", "index": ALL}, "n_clicks"),
+                    Input({"type": "agent-uniso", "index": ALL}, "n_clicks"),
+                ],
             )
-            def agents_page(_n):
+            def agents_page(_n, _iso, _uniso):
+                feedback = ""
+                if ctx.triggered_id and isinstance(ctx.triggered_id, dict):
+                    aid = ctx.triggered_id.get("index")
+                    if ctx.triggered_id.get("type") == "agent-iso":
+                        ok, msg = set_agent_isolation(aid, True)
+                        feedback = html.Span(msg, style={"color": "#15803d" if ok else "#b45309"})
+                    elif ctx.triggered_id.get("type") == "agent-uniso":
+                        ok, msg = set_agent_isolation(aid, False)
+                        feedback = html.Span(msg, style={"color": "#15803d" if ok else "#b45309"})
+                agents, source = fetch_agents()
                 cards = []
-                for a in _demo_agents():
-                    status_cls = "agent-status isolated" if a["status"] == "isolated" else "agent-status"
+                for a in agents:
+                    status = str(a.get("status", "active"))
+                    status_cls = "agent-status isolated" if status == "isolated" else "agent-status"
                     cards.append(
                         html.Div(
                             [
-                                html.H3(a["hostname"]),
-                                html.P(f"{a['os']} · v{a['version']}", className="agent-meta"),
-                                html.P(a["id"], className="agent-meta"),
-                                html.Span(a["status"], className=status_cls),
+                                html.H3(a.get("hostname")),
+                                html.P(f"{a.get('os')} · v{a.get('version')}", className="agent-meta"),
+                                html.P(a.get("id"), className="agent-meta"),
+                                html.Span(status, className=status_cls),
+                                html.Div(
+                                    [
+                                        html.Button(
+                                            "Isolate",
+                                            id={"type": "agent-iso", "index": a.get("id")},
+                                            className="btn",
+                                            n_clicks=0,
+                                            disabled=status == "isolated",
+                                        ),
+                                        html.Button(
+                                            "Restore",
+                                            id={"type": "agent-uniso", "index": a.get("id")},
+                                            className="btn btn-ghost",
+                                            n_clicks=0,
+                                            disabled=status != "isolated",
+                                        ),
+                                    ],
+                                    style={"display": "flex", "gap": "0.4rem", "marginTop": "0.75rem"},
+                                ),
                             ],
                             className="agent-card",
                         )
                     )
-                return cards
+                banner = html.Div(
+                    "XDR agents from API — isolate updates shared store for response workflows."
+                    if source == "api"
+                    else "Demo agents (API offline).",
+                    className="source-banner" + ("" if source == "api" else " demo"),
+                )
+                return cards, banner, feedback
 
             @self.app.callback(
                 [
@@ -1281,10 +1366,10 @@ if DASH_AVAILABLE:
                 Input("refresh-interval", "n_intervals"),
             )
             def system_page(_n):
-                services, source = _fetch_services()
+                services, source = fetch_services()
                 is_api = source == "api"
                 banner = html.Div(
-                    "Service registry from API."
+                    "Service registry from orchestrator API."
                     if is_api
                     else "Showing demo service registry.",
                     className="source-banner" + ("" if is_api else " demo"),
