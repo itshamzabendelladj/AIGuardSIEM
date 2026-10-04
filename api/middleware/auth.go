@@ -56,8 +56,13 @@ func Auth(jwtSecret string) gin.HandlerFunc {
     }
 }
 
-// RequireRole checks if user has required role
+// RequireRole checks if user has required role (or admin role)
 func RequireRole(role string) gin.HandlerFunc {
+    return RequireAnyRole(role)
+}
+
+// RequireAnyRole checks if user has any of the specified roles (or admin role)
+func RequireAnyRole(requiredRoles ...string) gin.HandlerFunc {
     return func(c *gin.Context) {
         roles, exists := c.Get("roles")
         if !exists {
@@ -75,8 +80,21 @@ func RequireRole(role string) gin.HandlerFunc {
 
         hasRole := false
         for _, r := range roleList {
-            if r == role {
+            roleStr, isStr := r.(string)
+            if !isStr {
+                continue
+            }
+            if roleStr == "admin" {
                 hasRole = true
+                break
+            }
+            for _, req := range requiredRoles {
+                if roleStr == req {
+                    hasRole = true
+                    break
+                }
+            }
+            if hasRole {
                 break
             }
         }

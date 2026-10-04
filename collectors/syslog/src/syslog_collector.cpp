@@ -172,8 +172,6 @@ void SyslogCollector::stop() {
 
 void SyslogCollector::udp_receive_loop() {
     std::vector<uint8_t> buffer(config_.buffer_size);
-    struct sockaddr_in client_addr{};
-    socklen_t addr_len = sizeof(client_addr);
 
     while (running_.load()) {
         struct pollfd pfd;
@@ -181,6 +179,9 @@ void SyslogCollector::udp_receive_loop() {
         pfd.events = POLLIN;
         int ret = poll(&pfd, 1, 100);
         if (ret <= 0) continue;
+
+        struct sockaddr_in client_addr{};
+        socklen_t addr_len = sizeof(client_addr);
 
         ssize_t recv_len = recvfrom(udp_socket_, buffer.data(), buffer.size(),
                                      0, reinterpret_cast<struct sockaddr*>(&client_addr), &addr_len);
@@ -214,6 +215,8 @@ void SyslogCollector::udp_receive_loop() {
 }
 
 void SyslogCollector::tcp_accept_loop() {
+    constexpr size_t MAX_CONCURRENT_TCP = 1024;
+
     while (running_.load()) {
         struct pollfd pfd;
         pfd.fd = tcp_socket_;
@@ -231,8 +234,18 @@ void SyslogCollector::tcp_accept_loop() {
             continue;
         }
 
-        // Handle in a detached thread
-        std::thread(&SyslogCollector::tcp_connection_handler, this, client_fd).detach();
+        // Check active connection limit to prevent thread exhaustion DoS
+        if (active_tcp_connections_.load() >= MAX_CONCURRENT_TCP) {
+            spdlog::warn("TCP connection limit reached ({}), rejecting connection", MAX_CONCURRENT_TCP);
+            close(client_fd);
+            continue;
+        }
+
+        active_tcp_connections_++;
+        std::thread([this, client_fd]() {
+            tcp_connection_handler(client_fd);
+            active_tcp_connections_--;
+        }).detach();
     }
 }
 

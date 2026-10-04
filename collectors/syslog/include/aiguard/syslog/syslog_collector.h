@@ -130,6 +130,7 @@ private:
 
     SyslogCollectorConfig config_;
     std::atomic<bool> running_{false};
+    std::atomic<size_t> active_tcp_connections_{0};
 
     // Network sockets
     int udp_socket_{-1};

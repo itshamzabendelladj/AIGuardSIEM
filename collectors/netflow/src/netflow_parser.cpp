@@ -95,9 +95,10 @@ std::vector<NetFlowRecord> NetFlowParser::parse_v9(const uint8_t* data, size_t l
     while (offset + 4 <= len && flow_set_count < count) {
         uint16_t flowset_id, flowset_len;
         std::memcpy(&flowset_id, data + offset, 2); flowset_id = ntohs(flowset_id);
-        std::memcpy(&flowset_len, data + offset + 2, 2); flowset_len = ntohs(flowset_len);
+        std::memcpy(&flowset_len, data + offset + 2); flowset_len = ntohs(flowset_len);
 
-        if (offset + flowset_len > len) break;
+        // Prevent infinite loop and buffer overread: flowset_len must be at least 4 bytes
+        if (flowset_len < 4 || offset + flowset_len > len) break;
 
         if (flowset_id == 0) {
             // Template flowset
@@ -123,13 +124,14 @@ std::vector<NetFlowRecord> NetFlowParser::parse_v9(const uint8_t* data, size_t l
         } else if (flowset_id >= 256) {
             // Data flowset
             auto tpl_it = templates.find(flowset_id);
-            if (tpl_it == templates.end()) {
-                // No template yet - skip
-            } else {
+            if (tpl_it != templates.end()) {
                 const auto& fields = tpl_it->second;
                 size_t record_offset = offset + 4;
                 size_t record_size = 0;
                 for (const auto& [type, flen] : fields) record_size += flen;
+
+                // Prevent infinite loop if record_size is 0
+                if (record_size == 0) break;
 
                 while (record_offset + record_size <= offset + flowset_len) {
                     NetFlowRecord record;
@@ -140,13 +142,30 @@ std::vector<NetFlowRecord> NetFlowParser::parse_v9(const uint8_t* data, size_t l
                         if (field_offset + field_len > offset + flowset_len) break;
 
                         auto read_uint = [&](size_t flen) -> uint32_t {
-                            uint32_t val = 0;
-                            std::memcpy(&val, data + field_offset, flen);
-                            switch (flen) {
-                                case 1: return val & 0xFF;
-                                case 2: return ntohs(val & 0xFFFF);
-                                case 4: return ntohl(val);
-                                default: return val;
+                            if (flen == 0 || field_offset + flen > offset + flowset_len || field_offset + flen > len) {
+                                return 0;
+                            }
+                            if (flen == 1) {
+                                return static_cast<uint32_t>(data[field_offset]);
+                            } else if (flen == 2) {
+                                uint16_t val16 = 0;
+                                std::memcpy(&val16, data + field_offset, 2);
+                                return ntohs(val16);
+                            } else if (flen == 4) {
+                                uint32_t val32 = 0;
+                                std::memcpy(&val32, data + field_offset, 4);
+                                return ntohl(val32);
+                            } else if (flen >= 8) {
+                                uint32_t hi = 0, lo = 0;
+                                std::memcpy(&hi, data + field_offset, 4);
+                                std::memcpy(&lo, data + field_offset + 4, 4);
+                                uint64_t val64 = (static_cast<uint64_t>(ntohl(hi)) << 32) | ntohl(lo);
+                                return static_cast<uint32_t>(val64 > UINT32_MAX ? UINT32_MAX : val64);
+                            } else {
+                                uint32_t val = 0;
+                                size_t copy_bytes = std::min(flen, sizeof(uint32_t));
+                                std::memcpy(&val, data + field_offset, copy_bytes);
+                                return ntohl(val);
                             }
                         };
 
@@ -167,13 +186,17 @@ std::vector<NetFlowRecord> NetFlowParser::parse_v9(const uint8_t* data, size_t l
                                 record.src_port = read_uint(field_len) & 0xFFFF;
                                 break;
                             case 8:  // IPV4_SRC_ADDR
-                                std::memcpy(&record.src_addr, data + field_offset, 4);
+                                if (field_len == 4 && field_offset + 4 <= len) {
+                                    std::memcpy(&record.src_addr, data + field_offset, 4);
+                                }
                                 break;
                             case 10: // L4_DST_PORT
                                 record.dst_port = read_uint(field_len) & 0xFFFF;
                                 break;
                             case 11: // IPV4_DST_ADDR
-                                std::memcpy(&record.dst_addr, data + field_offset, 4);
+                                if (field_len == 4 && field_offset + 4 <= len) {
+                                    std::memcpy(&record.dst_addr, data + field_offset, 4);
+                                }
                                 break;
                             case 12: // OUT_BYTES
                                 record.d_octets = read_uint(field_len);
@@ -222,9 +245,10 @@ std::vector<NetFlowRecord> NetFlowParser::parse_ipfix(const uint8_t* data, size_
     while (offset + 4 <= length) {
         uint16_t set_id, set_len;
         std::memcpy(&set_id, data + offset, 2); set_id = ntohs(set_id);
-        std::memcpy(&set_len, data + offset + 2, 2); set_len = ntohs(set_len);
+        std::memcpy(&set_len, data + offset + 2); set_len = ntohs(set_len);
 
-        if (offset + set_len > length) break;
+        // Prevent infinite loop and buffer overread: set_len must be at least 4 bytes
+        if (set_len < 4 || offset + set_len > length) break;
 
         if (set_id == 2) {
             // Template set
@@ -254,20 +278,42 @@ std::vector<NetFlowRecord> NetFlowParser::parse_ipfix(const uint8_t* data, size_
                 size_t record_size = 0;
                 for (const auto& [type, flen] : fields) record_size += flen;
 
+                // Prevent infinite loop if record_size is 0
+                if (record_size == 0) break;
+
                 while (record_offset + record_size <= offset + set_len) {
                     NetFlowRecord record;
                     record.version = NetFlowVersion::IPFIX;
                     size_t field_offset = record_offset;
 
                     for (const auto& [field_type, field_len] : fields) {
+                        if (field_offset + field_len > offset + set_len) break;
+
                         auto read_uint = [&](size_t flen) -> uint32_t {
-                            uint32_t val = 0;
-                            std::memcpy(&val, data + field_offset, flen);
-                            switch (flen) {
-                                case 1: return val & 0xFF;
-                                case 2: return ntohs(val & 0xFFFF);
-                                case 4: return ntohl(val);
-                                default: return val;
+                            if (flen == 0 || field_offset + flen > offset + set_len || field_offset + flen > len) {
+                                return 0;
+                            }
+                            if (flen == 1) {
+                                return static_cast<uint32_t>(data[field_offset]);
+                            } else if (flen == 2) {
+                                uint16_t val16 = 0;
+                                std::memcpy(&val16, data + field_offset, 2);
+                                return ntohs(val16);
+                            } else if (flen == 4) {
+                                uint32_t val32 = 0;
+                                std::memcpy(&val32, data + field_offset, 4);
+                                return ntohl(val32);
+                            } else if (flen >= 8) {
+                                uint32_t hi = 0, lo = 0;
+                                std::memcpy(&hi, data + field_offset, 4);
+                                std::memcpy(&lo, data + field_offset + 4, 4);
+                                uint64_t val64 = (static_cast<uint64_t>(ntohl(hi)) << 32) | ntohl(lo);
+                                return static_cast<uint32_t>(val64 > UINT32_MAX ? UINT32_MAX : val64);
+                            } else {
+                                uint32_t val = 0;
+                                size_t copy_bytes = std::min(flen, sizeof(uint32_t));
+                                std::memcpy(&val, data + field_offset, copy_bytes);
+                                return ntohl(val);
                             }
                         };
 
@@ -278,9 +324,17 @@ std::vector<NetFlowRecord> NetFlowParser::parse_ipfix(const uint8_t* data, size_
                             case 4: record.protocol = data[field_offset]; break;
                             case 6: record.tcp_flags = data[field_offset]; break;
                             case 7: record.src_port = read_uint(field_len) & 0xFFFF; break;
-                            case 8: std::memcpy(&record.src_addr, data + field_offset, 4); break;
+                            case 8:
+                                if (field_len == 4 && field_offset + 4 <= len) {
+                                    std::memcpy(&record.src_addr, data + field_offset, 4);
+                                }
+                                break;
                             case 10: record.dst_port = read_uint(field_len) & 0xFFFF; break;
-                            case 11: std::memcpy(&record.dst_addr, data + field_offset, 4); break;
+                            case 11:
+                                if (field_len == 4 && field_offset + 4 <= len) {
+                                    std::memcpy(&record.dst_addr, data + field_offset, 4);
+                                }
+                                break;
                             default: break;
                         }
                         field_offset += field_len;

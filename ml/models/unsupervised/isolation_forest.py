@@ -11,12 +11,42 @@ from __future__ import annotations
 import pickle
 import logging
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 import numpy as np
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger(__name__)
+
+
+class SafeModelUnpickler(pickle.Unpickler):
+    """Restricted unpickler that blocks arbitrary code execution during model deserialization."""
+
+    ALLOWED_MODULES = {
+        "numpy",
+        "numpy.core.multiarray",
+        "numpy._core.multiarray",
+        "numpy.dtype",
+        "sklearn.ensemble",
+        "sklearn.ensemble._iforest",
+        "sklearn.tree",
+        "sklearn.tree._classes",
+        "sklearn.tree._tree",
+        "sklearn.preprocessing",
+        "sklearn.preprocessing._data",
+    }
+
+    ALLOWED_BUILTINS = {
+        "dict", "list", "set", "int", "float", "str", "bool", "tuple", "bytearray", "bytes"
+    }
+
+    def find_class(self, module: str, name: str) -> Any:
+        is_allowed = any(module == allowed or module.startswith(allowed + ".") for allowed in self.ALLOWED_MODULES)
+        if is_allowed:
+            return super().find_class(module, name)
+        if module == "builtins" and name in self.ALLOWED_BUILTINS:
+            return super().find_class(module, name)
+        raise pickle.UnpicklingError(f"Security policy blocked loading untrusted class: '{module}.{name}'")
 
 
 class IsolationForestDetector:
@@ -196,7 +226,8 @@ class IsolationForestDetector:
     def load(self, path: str | Path) -> None:
         """Load a trained detector."""
         with open(path, "rb") as f:
-            data = pickle.load(f)
+            unpickler = SafeModelUnpickler(f)
+            data = unpickler.load()
         self.model = data["model"]
         self.scaler = data["scaler"]
         self.threshold = data["threshold"]

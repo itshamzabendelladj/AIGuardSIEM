@@ -2,11 +2,23 @@ package middleware
 
 import (
     "fmt"
+    "net/http"
+    "sync"
     "time"
 
     "github.com/gin-gonic/gin"
     "github.com/google/uuid"
     "go.uber.org/zap"
+)
+
+type clientRateLimit struct {
+    count     int
+    expiresAt time.Time
+}
+
+var (
+    rateLimitMu sync.Mutex
+    rateLimitMap = make(map[string]*clientRateLimit)
 )
 
 // RequestID adds a unique request ID to each request
@@ -94,12 +106,39 @@ func CORS(allowedOrigins []string) gin.HandlerFunc {
     }
 }
 
-// RateLimiter implements simple rate limiting
+// RateLimiter implements per-IP in-memory rate limiting to protect against DoS and brute-force
 func RateLimiter(requestsPerMinute int) gin.HandlerFunc {
-    // Simple in-memory rate limiter
-    // In production, use Redis-based rate limiting
+    if requestsPerMinute <= 0 {
+        requestsPerMinute = 1000
+    }
     return func(c *gin.Context) {
-        // TODO: Implement Redis-based rate limiting
+        clientIP := c.ClientIP()
+        now := time.Now()
+
+        rateLimitMu.Lock()
+        entry, exists := rateLimitMap[clientIP]
+        if !exists || now.After(entry.expiresAt) {
+            rateLimitMap[clientIP] = &clientRateLimit{
+                count:     1,
+                expiresAt: now.Add(time.Minute),
+            }
+            rateLimitMu.Unlock()
+            c.Next()
+            return
+        }
+
+        entry.count++
+        if entry.count > requestsPerMinute {
+            rateLimitMu.Unlock()
+            c.Header("Retry-After", "60")
+            c.JSON(http.StatusTooManyRequests, gin.H{
+                "error": "Rate limit exceeded. Please slow down.",
+            })
+            c.Abort()
+            return
+        }
+        rateLimitMu.Unlock()
+
         c.Next()
     }
 }

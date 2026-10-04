@@ -7,6 +7,8 @@
 
 namespace aiguard {
 
+static constexpr uint64_t SSTABLE_MAGIC = 0x4149475541524453ULL; // "AIGUARDS" in ASCII-hex
+
 uint32_t SSTable::bloom_hash(const std::string& key, uint32_t seed) {
     // MurmurHash3-style hash
     const uint32_t c1 = 0xcc9e2d51;
@@ -70,7 +72,12 @@ void SSTable::read_bloom_filter(std::ifstream& file) {
     file.read(reinterpret_cast<char*>(&index_count), 8);
     file.read(reinterpret_cast<char*>(&magic), 8);
 
-    if (magic != 0xA1GU4RD5157) return;  // Invalid magic
+    if (magic != SSTABLE_MAGIC) return;  // Invalid magic
+
+    // Bounds checking to prevent integer underflow, OOM, and corrupt file crashes
+    if (index_offset > file_size || bloom_size > index_offset) return;
+    if (bloom_size > 64 * 1024 * 1024) return;  // Max 64 MB bloom filter
+    if (index_count > 10000000) return;         // Max 10M keys
 
     bloom_bits_ = bloom_bits;
 
@@ -82,12 +89,14 @@ void SSTable::read_bloom_filter(std::ifstream& file) {
     // Read index
     file.seekg(index_offset);
     for (uint64_t i = 0; i < index_count; ++i) {
-        uint32_t key_len;
+        uint32_t key_len = 0;
         file.read(reinterpret_cast<char*>(&key_len), 4);
+        if (!file || key_len > 65536) return;  // Key length cap (64 KB)
         std::string key(key_len, '\0');
         file.read(key.data(), key_len);
-        uint64_t offset;
+        uint64_t offset = 0;
         file.read(reinterpret_cast<char*>(&offset), 8);
+        if (!file || offset > file_size) return;
         index_[key] = offset;
     }
 
@@ -177,7 +186,7 @@ std::unique_ptr<SSTable> SSTable::create(const std::string& filename,
 
     // Write footer
     uint64_t bloom_bits = sstable->bloom_bits_;
-    uint64_t magic = 0xA1GU4RD5157;
+    uint64_t magic = SSTABLE_MAGIC;
     file.write(reinterpret_cast<const char*>(&bloom_bits), 8);
     file.write(reinterpret_cast<const char*>(&bloom_size), 8);
     file.write(reinterpret_cast<const char*>(&index_offset), 8);

@@ -138,10 +138,10 @@ func (s *Server) setupRoutes() {
             {
                 rules.GET("", handlers.ListRules)
                 rules.GET("/:id", handlers.GetRule)
-                rules.POST("", handlers.CreateRule)
-                rules.PUT("/:id", handlers.UpdateRule)
-                rules.DELETE("/:id", handlers.DeleteRule)
-                rules.POST("/reload", handlers.ReloadRules)
+                rules.POST("", middleware.RequireAnyRole("secops", "admin"), handlers.CreateRule)
+                rules.PUT("/:id", middleware.RequireAnyRole("secops", "admin"), handlers.UpdateRule)
+                rules.DELETE("/:id", middleware.RequireAnyRole("secops", "admin"), handlers.DeleteRule)
+                rules.POST("/reload", middleware.RequireAnyRole("secops", "admin"), handlers.ReloadRules)
             }
 
             // Cases (Incident Response)
@@ -152,7 +152,7 @@ func (s *Server) setupRoutes() {
                 cases.POST("", handlers.CreateCase)
                 cases.PUT("/:id", handlers.UpdateCase)
                 cases.POST("/:id/assign", handlers.AssignCase)
-                cases.POST("/:id/close", handlers.CloseCase)
+                cases.POST("/:id/close", middleware.RequireAnyRole("analyst", "secops", "admin"), handlers.CloseCase)
                 cases.GET("/:id/timeline", handlers.GetCaseTimeline)
             }
 
@@ -170,9 +170,9 @@ func (s *Server) setupRoutes() {
             threatIntel := protected.Group("/threat-intel")
             {
                 threatIntel.GET("/indicators", handlers.ListIndicators)
-                threatIntel.POST("/indicators", handlers.CreateIndicator)
+                threatIntel.POST("/indicators", middleware.RequireAnyRole("analyst", "secops", "admin"), handlers.CreateIndicator)
                 threatIntel.GET("/feeds", handlers.ListThreatFeeds)
-                threatIntel.POST("/feeds", handlers.CreateThreatFeed)
+                threatIntel.POST("/feeds", middleware.RequireAnyRole("secops", "admin"), handlers.CreateThreatFeed)
             }
 
             // Agents
@@ -180,8 +180,8 @@ func (s *Server) setupRoutes() {
             {
                 agents.GET("", handlers.ListAgents)
                 agents.GET("/:id", handlers.GetAgent)
-                agents.POST("/:id/isolate", handlers.IsolateAgent)
-                agents.POST("/:id/unisolate", handlers.UnisolateAgent)
+                agents.POST("/:id/isolate", middleware.RequireAnyRole("secops", "incident_responder", "admin"), handlers.IsolateAgent)
+                agents.POST("/:id/unisolate", middleware.RequireAnyRole("secops", "incident_responder", "admin"), handlers.UnisolateAgent)
                 agents.GET("/:id/actions", handlers.GetAgentActions)
             }
 
@@ -189,7 +189,7 @@ func (s *Server) setupRoutes() {
             cloud := protected.Group("/cloud")
             {
                 cloud.GET("/accounts", handlers.ListCloudAccounts)
-                cloud.POST("/accounts", handlers.AddCloudAccount)
+                cloud.POST("/accounts", middleware.RequireRole("admin"), handlers.AddCloudAccount)
                 cloud.GET("/accounts/:id/findings", handlers.GetCloudFindings)
             }
 
@@ -198,12 +198,13 @@ func (s *Server) setupRoutes() {
             {
                 playbooks.GET("", handlers.ListPlaybooks)
                 playbooks.GET("/:id", handlers.GetPlaybook)
-                playbooks.POST("", handlers.CreatePlaybook)
-                playbooks.POST("/:id/execute", handlers.ExecutePlaybook)
+                playbooks.POST("", middleware.RequireAnyRole("secops", "admin"), handlers.CreatePlaybook)
+                playbooks.POST("/:id/execute", middleware.RequireAnyRole("secops", "incident_responder", "admin"), handlers.ExecutePlaybook)
             }
 
-            // Users and RBAC
+            // Users and RBAC (Admin only)
             users := protected.Group("/users")
+            users.Use(middleware.RequireRole("admin"))
             {
                 users.GET("", handlers.ListUsers)
                 users.POST("", handlers.CreateUser)
@@ -218,10 +219,10 @@ func (s *Server) setupRoutes() {
             {
                 system.GET("/status", handlers.GetSystemStatus(s.orchestrator))
                 system.GET("/services", handlers.ListServices(s.orchestrator))
-                system.POST("/services/:name/restart", handlers.RestartService(s.orchestrator))
-                system.GET("/config", handlers.GetSystemConfig)
-                system.PUT("/config", handlers.UpdateSystemConfig)
-                system.GET("/audit-log", handlers.GetAuditLog)
+                system.POST("/services/:name/restart", middleware.RequireRole("admin"), handlers.RestartService(s.orchestrator))
+                system.GET("/config", middleware.RequireRole("admin"), handlers.GetSystemConfig)
+                system.PUT("/config", middleware.RequireRole("admin"), handlers.UpdateSystemConfig)
+                system.GET("/audit-log", middleware.RequireRole("admin"), handlers.GetAuditLog)
             }
         }
     }

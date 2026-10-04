@@ -12,10 +12,9 @@ agent:
   event_batch_size: 500
   event_batch_timeout_ms: 100
 
-  # Excluded processes (wildcards supported)
+  # Excluded processes (exact binary path only to prevent evasion/blindspots)
   excluded_processes:
-    - "/usr/sbin/aiguard-*"
-    - "/opt/aiguard/*"
+    - "/usr/sbin/aiguard-agent"
 
   # Monitored paths for file integrity monitoring
   monitored_paths:

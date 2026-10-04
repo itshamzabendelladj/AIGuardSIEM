@@ -473,8 +473,9 @@ class PlaybookEngine:
                 return float(parts[0].strip()) < float(parts[1].strip())
 
             return bool(condition)
-        except Exception:
-            return True
+        except Exception as e:
+            logger.warning(f"Condition evaluation failed for '{condition}': {e}. Failing closed (condition not met).")
+            return False
 
     def _run_hooks(self, event: str, execution: PlaybookExecution) -> None:
         """Run lifecycle hooks."""
